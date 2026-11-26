@@ -13,7 +13,6 @@
 - 由于OC的容器类在mutableCopy的时候默认对容器内的对象进行引用而不是拷贝，所以有时拷贝容器需要递归地把容器内的对象都进行深拷贝
 - 归档与解档
 > 要求容器内所有自定义类都遵守<NSCoding>和<NSSecureCoding>协议
-
 ```objc
 NSArray *deepCopy = [NSKeyedUnarchiver unarchiveObjectWithData:NSKeyedArchiver archivedDataWithRootObject:oldArray];
 ```
@@ -41,7 +40,6 @@ NSArray *deepCopy = [NSKeyedUnarchiver unarchiveObjectWithData:NSKeyedArchiver a
 }
 @end
 ```
-
 # 自定义类去重
 - 自定义类去重需要重写当前类的hash方法和isEqual方法，这是因为set的去重逻辑是先判断hash值是否相等，如果相等，再使用isEqual进行确认
 `以先前的User类为例`

@@ -1,37 +1,44 @@
 {
-  "collapse-filter": false,
+  "collapse-filter": true,
   "search": "",
   "showTags": false,
-  "showAttachments": false,
+  "showAttachments": true,
   "hideUnresolved": false,
   "showOrphans": true,
   "collapse-color-groups": false,
   "colorGroups": [
     {
-      "query": "path:WeeklyReport  ",
-      "color": {
-        "a": 1,
-        "rgb": 15350073
-      }
-    },
-    {
       "query": "path:MarkDown  ",
       "color": {
         "a": 1,
-        "rgb": 1623794
+        "rgb": 11678833
+      }
+    },
+    {
+      "query": "path:WeeklyReport  ",
+      "color": {
+        "a": 1,
+        "rgb": 6924464
+      }
+    },
+    {
+      "query": "path:2026一面  ",
+      "color": {
+        "a": 1,
+        "rgb": 11657298
       }
     }
   ],
-  "collapse-display": false,
+  "collapse-display": true,
   "showArrow": false,
-  "textFadeMultiplier": 0,
-  "nodeSizeMultiplier": 1,
-  "lineSizeMultiplier": 1,
+  "textFadeMultiplier": 0.1,
+  "nodeSizeMultiplier": 1.76110549943883,
+  "lineSizeMultiplier": 1.77100448933782,
   "collapse-forces": false,
-  "centerStrength": 0.419403485254692,
-  "repelStrength": 10.0301608579088,
-  "linkStrength": 1,
+  "centerStrength": 0.518713248970312,
+  "repelStrength": 10,
+  "linkStrength": 0.638552188552189,
   "linkDistance": 250,
-  "scale": 1.0592693997071347,
+  "scale": 1.3028601205791934,
   "close": true
 }

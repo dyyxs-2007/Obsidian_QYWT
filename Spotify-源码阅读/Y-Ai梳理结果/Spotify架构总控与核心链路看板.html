@@ -1,0 +1,1770 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spotify iOS 架构总控与核心链路详解看板</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    :root {
+      --background: #121214;
+      --content: #161618;
+      --card: #1b1b1f;
+      --sidebar: #161618;
+      --card-border: #2a2a30;
+      --border: #2e2e36;
+      --foreground: #f4f4f6;
+      --muted-foreground: #a1a1aa;
+      --placeholder: #71717a;
+      --code-foreground: #86efac;
+      --primary: #1ed760;
+      --primary-foreground: #090d0a;
+      --secondary: #27272d;
+      --secondary-foreground: #e4e4e7;
+      --accent: #1ed760;
+      --link: #38bdf8;
+      --success: #34d399;
+      --warning: #fbbf24;
+      --error: #f87171;
+    }
+    .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .pulse-ring { animation: pulseBorder 1.4s ease-out; }
+    @keyframes pulseBorder {
+      0% { box-shadow: 0 0 0 0 var(--primary); }
+      70% { box-shadow: 0 0 0 6px transparent; }
+      100% { box-shadow: 0 0 0 0 transparent; }
+    }
+  </style>
+</head>
+<body class="bg-[var(--background)] text-[var(--foreground)] antialiased m-0 p-0">
+  <div class="max-w-[1600px] mx-auto p-3 md:p-5 space-y-4">
+
+    <!-- 顶部总控横幅 -->
+    <header class="bg-[var(--card)] border border-[var(--border)] rounded-xl p-4 space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="space-y-1">
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-[var(--primary)] text-[var(--primary-foreground)]">Objective-C + UIKit + Runtime</span>
+            <h1 class="text-base md:text-lg font-bold tracking-tight">Spotify iOS 仿写项目 · 架构总控与核心实现按需拆解台</h1>
+          </div>
+          <p class="text-xs text-[var(--muted-foreground)]">
+            左栏为<strong>「全局架构总控 & 层级/协议按需下钻」</strong>（看整体、查协议供需、按层进子模块）；右栏为<strong>「路径内重点实现逻辑详解」</strong>（按调用链路拆解 6 大特殊场景与 OC/Runtime 技巧，支持左右双向定位跳转）。
+          </p>
+        </div>
+        <div class="flex items-center gap-2 w-full md:w-auto">
+          <input id="globalSearch" type="text" placeholder="搜索类名 / @protocol / 方法名 / 场景关键词..."
+                 class="w-full md:w-72 px-3 py-1.5 text-xs rounded-lg bg-[var(--background)] border border-[var(--border)] text-[var(--foreground)] placeholder-[var(--placeholder)] focus:outline-none focus:border-[var(--primary)]" />
+          <button id="clearSearchBtn" class="hidden px-2.5 py-1.5 text-xs rounded-lg bg-[var(--secondary)] text-[var(--secondary-foreground)] hover:opacity-90">重置</button>
+        </div>
+      </div>
+
+      <!-- 顶部高频困惑一键直达条 -->
+      <div class="flex flex-wrap items-center gap-1.5 pt-2 border-t border-[var(--card-border)] text-xs">
+        <span class="text-[var(--muted-foreground)] font-medium mr-1">痛点直达：</span>
+        <button onclick="quickJump('P0', 'protocols')" class="px-2.5 py-1 rounded-md bg-[var(--secondary)] text-[var(--secondary-foreground)] hover:opacity-90 transition">🔌 7大协议给谁用/谁实现</button>
+        <button onclick="quickJump('L4', 'network')" class="px-2.5 py-1 rounded-md bg-[var(--secondary)] text-[var(--secondary-foreground)] hover:opacity-90 transition">🌐 网络申请与并发防惊群</button>
+        <button onclick="quickJump('L5', 'lru3')" class="px-2.5 py-1 rounded-md bg-[var(--secondary)] text-[var(--secondary-foreground)] hover:opacity-90 transition">🗂️ 三级 LRU 缓存 (L1/L2/L3)</button>
+        <button onclick="quickJump('L3', 'audiocache')" class="px-2.5 py-1 rounded-md bg-[var(--secondary)] text-[var(--secondary-foreground)] hover:opacity-90 transition">⚡ 歌曲缓存与上下首0ms预加载</button>
+        <button onclick="quickJump('L3', 'background')" class="px-2.5 py-1 rounded-md bg-[var(--secondary)] text-[var(--secondary-foreground)] hover:opacity-90 transition">🔒 后台播放/锁屏/灵动岛</button>
+        <button onclick="quickJump('L2', 'infinite')" class="px-2.5 py-1 rounded-md bg-[var(--secondary)] text-[var(--secondary-foreground)] hover:opacity-90 transition">♾️ 首页无限刷新与保序分页</button>
+        <button onclick="quickJump('L1', 'uiarch')" class="px-2.5 py-1 rounded-md bg-[var(--secondary)] text-[var(--secondary-foreground)] hover:opacity-90 transition">🎨 界面架构与三槽位丝滑转场</button>
+      </div>
+    </header>
+
+    <!-- 双区块主工作台 -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+
+      <!-- 区块一：左侧总控与层级下钻 (5 cols) -->
+      <section class="lg:col-span-5 bg-[var(--card)] border border-[var(--border)] rounded-xl overflow-hidden flex flex-col">
+        <div class="p-3.5 border-b border-[var(--card-border)] flex items-center justify-between">
+          <div>
+            <div class="text-xs font-bold uppercase tracking-wider text-[var(--primary)]">区块一 · 架构总控与层级下钻</div>
+            <div class="text-xs text-[var(--muted-foreground)] mt-0.5">点击任意层级或协议进入子架构，点击卡片按需展开方法与依赖</div>
+          </div>
+          <span id="leftCountBadge" class="px-2 py-0.5 text-xs font-mono rounded bg-[var(--background)] border border-[var(--border)]">7 个视图</span>
+        </div>
+
+        <!-- 层级导航胶囊 -->
+        <div id="layerTabs" class="p-2.5 bg-[var(--background)] border-b border-[var(--card-border)] flex flex-wrap gap-1.5"></div>
+
+        <!-- 层级内部详情容器 -->
+        <div id="leftPaneContent" class="p-3.5 space-y-3 max-h-[780px] overflow-y-auto custom-scroll"></div>
+      </section>
+
+      <!-- 区块二：右侧路径内重点实现逻辑详解 (7 cols) -->
+      <section class="lg:col-span-7 bg-[var(--card)] border border-[var(--border)] rounded-xl overflow-hidden flex flex-col">
+        <div class="p-3.5 border-b border-[var(--card-border)] flex items-center justify-between">
+          <div>
+            <div class="text-xs font-bold uppercase tracking-wider text-[var(--primary)]">区块二 · 路径内重点实现逻辑详解</div>
+            <div class="text-xs text-[var(--muted-foreground)] mt-0.5">点击上方场景或调用路径节点，逐层拆解核心方法、设计巧思与源码行号</div>
+          </div>
+          <span id="rightStepIndicator" class="px-2 py-0.5 text-xs font-mono rounded bg-[var(--background)] border border-[var(--border)]">按需跳转</span>
+        </div>
+
+        <!-- 专题切换条 -->
+        <div id="scenarioTabs" class="p-2.5 bg-[var(--background)] border-b border-[var(--card-border)] flex flex-wrap gap-1.5"></div>
+
+        <!-- 调用路径步骤条 + 深度解析区 -->
+        <div id="rightPaneContent" class="p-4 space-y-4 max-h-[780px] overflow-y-auto custom-scroll"></div>
+      </section>
+
+    </div>
+  </div>
+
+  <script>
+    // ==================== 数据模型：区块一（层级架构与协议矩阵） ====================
+    const ARCH_LAYERS = [
+      {
+        id: 'L0',
+        badge: 'L0 总控',
+        title: '全局五层架构总控图',
+        subtitle: '三大架构支柱：Facade 门面 + @protocol 策略插座 + NSHashTable 弱引用多播观察者',
+        summary: '整个项目遵循严格的单向依赖与协议隔离：UI 模块（Modules）绝不直接碰 AVPlayer 或 NSURLSession，一切播放指令走 SPPlayerService 门面，一切数据请求走 SPMusicRepository 门面。',
+        diagram: [
+          { layerId: 'L1', tag: '第 1 层 · App 容器层', name: 'AppDelegate / SceneDelegate / SPRootViewController / SPNavigationController', desc: '启动依赖注入、引导/登录门禁路由、三明治根容器（隐藏原生TabBar + 悬浮MiniPlayer + 零抖动抽屉）', jumpScenario: 'uiarch' },
+          { layerId: 'L2', tag: '第 2 层 · Modules 业务界面层', name: 'Home / Search / Library / Detail / MiniPlayer / NowPlaying / Transition / Drawer / Settings', desc: '只消费 SPMediaItem 协议渲染卡片与行，只调 SPPlayerService 与 SPMusicRepository，通过 SPPlayerObserver 响应状态', jumpScenario: 'infinite' },
+          { layerId: 'L3', tag: '第 3 层 · Player 播放服务与内核层', name: 'SPPlayerService (门面) → SPPlayQueue + SPAudioCacheManager (L1/L2) + SPAVPlayerEngine + SPSystemMediaController', desc: '管理播放队列、洗牌算法、L1/L2音频缓存与上下首预加载、AVPlayer KVO 封装、锁屏/灵动岛与后台切歌保活', jumpScenario: 'audiocache' },
+          { layerId: 'L4', tag: '第 4 层 · Data 数据仓库与多源层', name: 'SPMusicRepository (门面 + L3缓存) → SPMusicDataSource <SPNeteaseMusicSource | SPMockMusicSource> + SPLibraryStore', desc: '支持网易云真实 API 与本地 Mock 热切换、L3 元数据 LRU 缓存、匿名/用户 Cookie 会话管理、自建歌单持久化', jumpScenario: 'network' },
+          { layerId: 'L5', tag: '第 5 层 · Core 基础底座与 Models 领域层', name: 'SPLRUCache / SPHTTPClient / SPAuthService / SPTheme / Runtime 分类 / SPMediaItem 领域模型', desc: 'os_unfair_lock 双向链表 LRU、NSURLSession 封装、Keychain+SHA256 认证、封面降采样与16x16色相桶取色', jumpScenario: 'lru3' }
+        ],
+        nodes: [
+          {
+            id: 'Pillar-Facade',
+            name: '架构支柱 ①：双门面模式 (Dual Facade)',
+            file: 'Spotify/Player/SPPlayerService.h & Spotify/Data/Repository/SPMusicRepository.h',
+            role: '收拢所有外部复杂性，向 UI 层只暴露两个单例入口',
+            provides: 'UI 控制器只调用 [SPPlayerService shared] 控制播放、调用 [SPMusicRepository shared] 获取数据',
+            methods: [
+              'SPPlayerService: -playTracks:startIndex:contextTitle:, -togglePlayPause, -next, -previous, -seekToTime:',
+              'SPMusicRepository: -fetchHomeSectionsForCategory:completion:, -searchWithKeyword:completion:, -fetchPlayURLForTrack:completion:'
+            ],
+            jump: { scenario: 'protocols', step: 0 }
+          },
+          {
+            id: 'Pillar-Protocol',
+            name: '架构支柱 ②：协议插座解耦 (@protocol Socket)',
+            file: 'SPMusicDataSource.h / SPAudioEngine.h / SPAuthProvider.h / SPMediaItem.h',
+            role: '把易变的「数据源」「音频解码器」「登录渠道」「媒体模型」全部抽象成协议',
+            provides: 'AppDelegate 启动或 Settings 页点击切换时，直接替换 repo.source 或 auth.provider，UI 零改动热切换',
+            methods: [
+              '[SPMusicRepository shared].source = [SPNeteaseMusicSource new] 或 [SPMockMusicSource new]',
+              '[SPAuthService shared].provider = [SPLocalAuthProvider new] 或 [SPNeteaseAuthProvider new]'
+            ],
+            jump: { scenario: 'protocols', step: 1 }
+          },
+          {
+            id: 'Pillar-Multicast',
+            name: '架构支柱 ③：弱引用多播观察者 (NSHashTable Multicast)',
+            file: 'Spotify/Player/SPPlayerService.m:L18-L80',
+            role: '解决传统 delegate 只能一对一、NSNotification 缺乏类型约束的痛点',
+            provides: '用 [NSHashTable weakObjectsHashTable] 存储观察者，VC 销毁自动移除无需手动解绑，切歌时同时通知 RootVC、MiniPlayer、NowPlaying、Detail 等 8 个组件',
+            methods: [
+              '-addObserver:(id<SPPlayerObserver>)observer',
+              '-notify:(SEL)selector (遍历 observers.allObjects 动态派发)'
+            ],
+            jump: { scenario: 'protocols', step: 3 }
+          }
+        ]
+      },
+      {
+        id: 'P0',
+        badge: '🔌 7大协议',
+        title: '七大 @protocol 接口供需全景矩阵',
+        subtitle: '彻底厘清：每个协议谁定义、提供给谁调、哪些类的哪些方法实现了它',
+        summary: '全项目共有 7 个核心自定义协议，分为三类：① 策略插座协议（SPMusicDataSource / SPAudioEngine / SPAuthProvider）；② 多态模型协议（SPMediaItem）；③ 状态回调协议（SPPlayerObserver / SPAudioEngineDelegate / SPAuthObserver）。',
+        nodes: [
+          {
+            id: 'Proto-SPMusicDataSource',
+            name: '@protocol SPMusicDataSource',
+            file: 'Spotify/Data/SPMusicDataSource.h:L29-L72',
+            role: '【数据层插座】定义 12 个音乐数据异步读取接口',
+            implementers: '① SPNeteaseMusicSource（真实网易云 API 实现）\n② SPMockMusicSource（本地 mock_data.json 实现）\n③ SPMusicRepository（门面装饰器实现：加 L3 缓存 + 主线程派发）',
+            consumers: '所有业务 VC（SPHomeVC / SPSearchVC / SPLibraryVC / SPDetailVC / SPNowPlayingVC）以及 SPAudioCacheManager（查播放 URL），统一通过 [SPMusicRepository shared] 调用',
+            methods: [
+              '-fetchHomeSectionsForCategory:completion: (首页分类分区)',
+              '-fetchHomeMoreSectionsForCategory:page:completion: (首页无限上滑分页)',
+              '-fetchSearchCategoriesWithCompletion: & -searchWithKeyword:completion: (搜索)',
+              '-fetchPlaylistWithId:completion: / -fetchAlbumWithId:completion: / -fetchArtistTopTracksWithId:completion: (详情)',
+              '-fetchPlayURLForTrack:completion: (播放前实时换取音频流 URL)',
+              '-fetchLyricsForTrack:completion: (获取双语 LRC 歌词文档)'
+            ],
+            jump: { scenario: 'protocols', step: 1 }
+          },
+          {
+            id: 'Proto-SPMediaItem',
+            name: '@protocol SPMediaItem',
+            file: 'Spotify/Models/SPMediaItem.h:L20-L31',
+            role: '【多态渲染协议】抹平歌曲、专辑、歌单、艺人 4 种模型在 UI 卡片与列表行中的差异',
+            implementers: '① SPTrack (SPTrack.m:L33-L45)\n② SPAlbum (SPAlbum.m:L27-L44)\n③ SPPlaylist (SPPlaylist.m:L24-L45)\n④ SPArtist (SPArtist.m:L12-L21)',
+            consumers: 'SPMediaCardCell、SPHomeShortcutCell、SPMediaRowView、UIImageView(SPCover)、SPDetailViewController、SPDetailHeaderView',
+            methods: [
+              '-(SPMediaType)mediaType (返回 Track / Album / Playlist / Artist，决定封面是圆是方、点击是播歌还是进详情)',
+              '-(NSString *)identifier / -(NSString *)title / -(NSString *)subtitle',
+              '-(nullable NSString *)coverURL / -(nullable UIColor *)themeColor'
+            ],
+            jump: { scenario: 'protocols', step: 2 }
+          },
+          {
+            id: 'Proto-SPPlayerObserver',
+            name: '@protocol SPPlayerObserver',
+            file: 'Spotify/Player/SPPlayerService.h:L32-L39',
+            role: '【多播状态订阅协议】把播放器的曲目、状态、进度、队列、模式变化广播给全 App UI',
+            implementers: '共 8 个类实现：\n① SPRootViewController (L435: 监听切歌显隐 MiniPlayer)\n② SPMiniPlayerView (L441-L460: 监听全部 5 个方法刷新槽位与进度条)\n③ SPNowPlayingViewController (L953-L968: 监听全部 5 个方法刷新大播放页与歌词)\n④ SPDetailViewController (L453-L465: 刷新列表行绿色高亮与跳动音律条)\n⑤ SPHomeViewController (L485: 监听切歌提取封面主色刷新首页顶部氛围光)\n⑥ SPSearchViewController (L509) / ⑦ SPHistoryViewController (L197) / ⑧ SPQueueViewController (L124)',
+            consumers: '仅由 SPPlayerService 内部通过 -notify:(SEL)selector 调用派发',
+            methods: [
+              '@optional -playerDidChangeTrack:(SPPlayerService *)player',
+              '@optional -playerDidChangeState:(SPPlayerService *)player',
+              '@optional -playerDidUpdateProgress:(SPPlayerService *)player',
+              '@optional -playerDidChangeQueue:(SPPlayerService *)player',
+              '@optional -playerDidChangeMode:(SPPlayerService *)player'
+            ],
+            jump: { scenario: 'protocols', step: 3 }
+          },
+          {
+            id: 'Proto-SPAudioEngine',
+            name: '@protocol SPAudioEngine & @protocol SPAudioEngineDelegate',
+            file: 'Spotify/Player/Engine/SPAudioEngine.h:L16-L41',
+            role: '【音频内核隔离协议】将底层 AVPlayer 与上层播放队列/缓存/系统控制彻底解耦',
+            implementers: 'SPAudioEngine 由 SPAVPlayerEngine 实现 (SPAVPlayerEngine.m:L60-L158)；\nSPAudioEngineDelegate 由 SPPlayerService 实现 (SPPlayerService.m:L347-L383)',
+            consumers: 'SPPlayerService 持有 id<SPAudioEngine> engine 并下发指令；SPAVPlayerEngine 通过 weak delegate 向上汇报状态与进度',
+            methods: [
+              'SPAudioEngine: -loadURL:autoPlay:, -loadAsset:autoPlay:, -play, -pause, -stop, -seekToTime:completion:',
+              'SPAudioEngineDelegate: -audioEngine:didChangeState:, -audioEngine:didUpdateCurrentTime:duration:bufferedTime:, -audioEngineDidFinishPlaying:, -audioEngine:didFailWithError:'
+            ],
+            jump: { scenario: 'protocols', step: 4 }
+          },
+          {
+            id: 'Proto-SPAuthProvider',
+            name: '@protocol SPAuthProvider & @protocol SPAuthObserver',
+            file: 'Spotify/Core/Auth/SPAuthProvider.h:L19-L45 & SPAuthService.h:L16-L20',
+            role: '【认证策略与登录态广播协议】隔离本地 Keychain 认证与网易云远端认证',
+            implementers: 'SPAuthProvider 由 SPLocalAuthProvider 和 SPNeteaseAuthProvider 实现；\nSPAuthObserver 由 SPUserAvatarButton、SPSideDrawerViewController、SPLibraryViewController、SPSettingsViewController 实现',
+            consumers: 'SPAuthService 持有 id<SPAuthProvider> provider 并向 SPAuthObserver 广播 -authServiceDidChangeUser:',
+            methods: [
+              'SPAuthProvider: -sendVerificationCodeToAccount:purpose:completion:, -registerWithAccount:..., -loginWithAccount:password:completion:, -loginWithAccount:verificationCode:completion:',
+              'SPAuthObserver: -authServiceDidChangeUser:(SPAuthService *)authService'
+            ],
+            jump: { scenario: 'protocols', step: 5 }
+          }
+        ]
+      },
+      {
+        id: 'L1',
+        badge: 'L1 容器层',
+        title: 'App 入口与根容器层 (Spotify/App/)',
+        subtitle: '负责依赖注入、引导门禁路由、三明治根容器与无导航栏侧滑手势恢复',
+        summary: '这一层只有 4 个类，但决定了整个 App 的骨架：AppDelegate 注入默认数据源与认证源；SceneDelegate 决定启动进引导页、登录页还是主界面；SPRootViewController 组装三层容器；SPNavigationController 恢复全屏返回手势。',
+        nodes: [
+          {
+            id: 'Class-AppDelegate',
+            name: 'AppDelegate',
+            file: 'Spotify/App/AppDelegate.m:L17-L45',
+            role: '应用启动配置与策略注入点',
+            provides: '读取 NSUserDefaults 决定向 SPMusicRepository.shared.source 注入 SPNeteaseMusicSource 还是 SPMockMusicSource，向 SPAuthService.shared.provider 注入 SPLocalAuthProvider 还是 SPNeteaseAuthProvider，并设置 SDImageCache 内存上限 80MB',
+            methods: ['-application:didFinishLaunchingWithOptions: (L19-L37)'],
+            jump: { scenario: 'protocols', step: 1 }
+          },
+          {
+            id: 'Class-SceneDelegate',
+            name: 'SceneDelegate',
+            file: 'Spotify/App/SceneDelegate.m:L17-L109',
+            role: '窗口根控制器状态机与交叉溶解转场中心',
+            provides: '根据 hasCompletedOnboarding / SPAuthService.isLoggedIn / hasEnteredGuestMode 决定首屏是 SPOnboardingViewController、SPAuthWelcomeViewController 还是 SPRootViewController',
+            methods: [
+              '-scene:willConnectToSession:options: (L45-L75)',
+              '-transitionToMainAppAnimated: / -transitionToAuthWelcomeAnimated: (L79-L107)'
+            ],
+            jump: { scenario: 'uiarch', step: 0 }
+          },
+          {
+            id: 'Class-SPRootViewController',
+            name: 'SPRootViewController',
+            file: 'Spotify/App/SPRootViewController.m:L149-L629',
+            role: '全局总控根容器（Stationary Main + Bottom Dock + Overlay Drawer）',
+            provides: '管理 SPInternalTabBarController（隐藏系统原生 TabBar）、自定义底栏 customTabBar、悬浮 SPMiniPlayerView、左侧抽屉 SPSideDrawerViewController，以及点击 MiniPlayer 弹出 SPNowPlayingViewController 的自定义转场',
+            methods: [
+              '-setupTabs / -setupBottomDock / -setupOverlayDrawer (L192-L370)',
+              '-updateTabDockMetrics (L305-L313: 动态注入 additionalSafeAreaInsets.bottom)',
+              '-handleDrawerPan: & -applyDrawerProgress: (L469-L502: 底层静止零抖动抽屉)',
+              '-handleDrawerAction: (L562-L591: 先无动画 push 再关抽屉的单段丝滑转场)',
+              '-presentNowPlaying (L602-L615: 绑定 SPNowPlayingTransition)'
+            ],
+            jump: { scenario: 'uiarch', step: 1 }
+          },
+          {
+            id: 'Class-SPNavigationController',
+            name: 'SPNavigationController',
+            file: 'Spotify/App/SPNavigationController.m:L11-L30',
+            role: '隐藏系统导航栏并修复侧滑返回手势的导航容器',
+            provides: '全局设置 navigationBarHidden = YES，接管 interactivePopGestureRecognizer.delegate，在 viewControllers.count > 1 时恢复系统右滑返回',
+            methods: [
+              '-viewDidLoad (L13-L19)',
+              '-gestureRecognizerShouldBegin: (L21-L26)'
+            ],
+            jump: { scenario: 'uiarch', step: 2 }
+          }
+        ]
+      },
+      {
+        id: 'L2',
+        badge: 'L2 界面层',
+        title: 'Modules 业务界面层 (Spotify/Modules/)',
+        subtitle: '9 个独立功能模块：全部面向协议与门面编程，互不耦合',
+        summary: '每个页面只负责布局、手势与局部状态，数据获取调 SPMusicRepository，播放指令调 SPPlayerService，列表项配置统一传 id<SPMediaItem>。',
+        nodes: [
+          {
+            id: 'Class-SPHomeViewController',
+            name: 'SPHomeViewController',
+            file: 'Spotify/Modules/Home/SPHomeViewController.m:L103-L652',
+            role: '首页：CompositionalLayout 多样式分区 + 顶部分类胶囊 + 无限上滑加载 + 氛围渐变光',
+            provides: '支持「全部/音乐/播客」三分类独立缓存与分页状态机；首屏加载后自动调用 warmupPlayerIfNeededWithSections: 预置 MiniPlayer 默认曲目；切歌时提取封面主色调更新顶部 280pt 氛围渐变',
+            methods: [
+              '-createLayout (L268-L325: Shortcut双列网格 / Card横滑 / Artist横滑 + 全局底部Footer)',
+              '-loadDataForCurrentCategoryForceRefresh: (L346-L377)',
+              '-loadMoreSections & -scrollViewDidScroll: (L379-L424, L632-L644: 距底280pt触发无闪烁批量插入)',
+              '-warmupPlayerIfNeededWithSections: (L499-L530)'
+            ],
+            jump: { scenario: 'infinite', step: 0 }
+          },
+          {
+            id: 'Class-SPDetailViewController',
+            name: 'SPDetailViewController & SPDetailHeaderView',
+            file: 'Spotify/Modules/Detail/SPDetailViewController.m:L37-L467',
+            role: '歌单 / 专辑 / 艺人统一详情页（多态复用同一个 VC）',
+            provides: '初始化时同步查询 L3 缓存（cachedPlaylistForId:/cachedAlbumForId:）实现首帧直出零跳动；滚动时下拉放大封面、上滑视差移动渐变并渐显顶栏标题；订阅 SPPlayerObserver 实时刷新当前播放行绿色音律动画',
+            methods: [
+              '-initWithMediaItem:(id<SPMediaItem>)item (L39-L74: L3同步命中优化)',
+              '-scrollViewDidScroll: (L425-L438: 导航栏渐显与封面弹性拉伸)',
+              '-updateVisibleRowStates (L442-L451: 局部更新可见行播放态)'
+            ],
+            jump: { scenario: 'lru3', step: 4 }
+          },
+          {
+            id: 'Class-SPMiniPlayerView',
+            name: 'SPMiniPlayerView',
+            file: 'Spotify/Modules/MiniPlayer/SPMiniPlayerView.m:L89-L469',
+            role: '悬浮迷你播放条：三槽位横滑切歌 + 背景色实时插值 + 双轨进度条',
+            provides: '内置 prevSlot / centerSlot / nextSlot 三个槽位，横滑时实时将当前封面色向目标曲目封面色线性插值，松手落定瞬间画面接力零闪烁切歌',
+            methods: [
+              '-reloadTrackSlots & -layoutTrackPagerIfNeededForce: (L122-L158, L311-L333)',
+              '-scrollViewDidScroll: & -finalizeTrackPagerSettle: (L368-L437)'
+            ],
+            jump: { scenario: 'uiarch', step: 3 }
+          },
+          {
+            id: 'Class-SPNowPlayingViewController',
+            name: 'SPNowPlayingViewController & SPLyricsCardView',
+            file: 'Spotify/Modules/NowPlaying/SPNowPlayingViewController.m:L195-L970',
+            role: '全屏播放页：三槽位大封面横滑 + 进度Scrubbing + 实时双语歌词卡片 + 下拉缩放关闭',
+            provides: '上方主控舞台（三卡片横滑切歌、暂停时封面 0.92 倍弹性缩小、播放时 1.0 倍放大）+ 下方 SPLyricsCardView（支持点击某行歌词直接 seekToTime: 及展开全屏歌词页 SPFullScreenLyricsViewController）',
+            methods: [
+              '-handlePan: (L591-L618: 下拉跟随缩放与阻尼回弹/关闭)',
+              '-finalizeTrackPagerSettle: (L785-L830: 大封面三槽位无缝接力)',
+              '-loadLyricsForTrack: (L699-L714: 异步拉取并驱动歌词时间轴)'
+            ],
+            jump: { scenario: 'uiarch', step: 3 }
+          },
+          {
+            id: 'Class-SPNowPlayingTransition',
+            name: 'SPNowPlayingTransition & SPNowPlayingAnimator',
+            file: 'Spotify/Modules/Transition/SPNowPlayingTransition.m:L15-L163',
+            role: 'MiniPlayer 与全屏播放页之间的封面跨层级飞行转场动画器',
+            provides: '实现 UIViewControllerTransitioningDelegate 与 UIViewControllerAnimatedTransitioning，在转场容器中创建 floatingCover 从 40x40 小封面弹簧飞行到 320x320 大封面',
+            methods: ['-animateTransition: (L21-L113)'],
+            jump: { scenario: 'uiarch', step: 4 }
+          },
+          {
+            id: 'Class-SPSearchAndLibrary',
+            name: 'SPSearchViewController & SPLibraryViewController',
+            file: 'SPSearchViewController.m & SPLibraryViewController.m',
+            role: '搜索页（分类网格 + 防抖综合搜索）与音乐库页（本地自建歌单 + 远端推荐双分区 + 列表/网格切换）',
+            provides: 'SPSearchVC 实现输入防抖与 4 类结果（单曲/艺人/专辑/歌单）聚合展示；SPLibraryVC 结合 SPLibraryStore（点赞歌曲、自建歌单、关注艺人）与远端数据，支持一键新建/删除歌单',
+            methods: [
+              'SPSearchVC: -textDidChange: (防抖搜索), -performSearchWithKeyword:',
+              'SPLibraryVC: -rebuildDisplayData (融合本地 SPLibraryStore 与远端 items)'
+            ],
+            jump: { scenario: 'network', step: 3 }
+          }
+        ]
+      },
+      {
+        id: 'L3',
+        badge: 'L3 播放层',
+        title: 'Player 播放服务与音频内核层 (Spotify/Player/)',
+        subtitle: '5 个核心类协同：门面调度 + 队列洗牌 + L1/L2缓存预加载 + AVPlayer引擎 + 系统锁屏灵动岛',
+        summary: 'Player 层采用标准的内外分层：对外只有 SPPlayerService 一个门面；对内拆分为队列管理（SPPlayQueue）、缓存与预加载（SPAudioCacheManager）、播放引擎（SPAVPlayerEngine）和系统媒体集成（SPSystemMediaController）四个专职组件。',
+        nodes: [
+          {
+            id: 'Class-SPPlayerService',
+            name: 'SPPlayerService',
+            file: 'Spotify/Player/SPPlayerService.m:L35-L385',
+            role: '播放器唯一门面 & 状态机总控 & 多播通知中心',
+            provides: '协调队列、缓存、引擎与系统控制中心；使用 loadTicket 解决快速切歌异步回调竞态；使用 UIBackgroundTask 保证后台自动切歌不被系统挂起；连续失败自动跳过无版权歌曲',
+            methods: [
+              '-startCurrentTrackWithAutoPlay: (L234-L284: 核心播歌主链路)',
+              '-preloadAdjacentTracks (L302-L312: 触发上下首预加载)',
+              '-beginTransitionBackgroundTask (L286-L300: 后台切歌保活)',
+              '-handlePlaybackFailureWithMessage: (L314-L325: 无版权自动跳下一首)',
+              '-syncNowPlayingInfoForce: (L337-L345: 5秒节流同步锁屏信息)'
+            ],
+            jump: { scenario: 'audiocache', step: 0 }
+          },
+          {
+            id: 'Class-SPAudioCacheManager',
+            name: 'SPAudioCacheManager',
+            file: 'Spotify/Player/Cache/SPAudioCacheManager.m:L40-L445',
+            role: 'L1 内存 + L2 磁盘音频缓存与上下首静默预加载管理器',
+            provides: '管理 L1 URL缓存(64条, 15min TTL)、L1 AVURLAsset缓存(6首) 与 L2 磁盘音频文件缓存(40首/200MB, manifest.json 持久化 MRU)；提供三级命中解析漏斗与后台低优先级原子下载',
+            methods: [
+              '-resolvePlayableAssetForTrack:completion: (L270-L332: L2磁盘 → L1 Asset → L1 URL → 网络请求)',
+              '-preloadTracks: & -warmupAssetAndDiskForSafeKey:remoteURL: (L334-L365: 预热 playable/duration 键值并下载)',
+              '-downloadToDiskInBackgroundForSafeKey:remoteURL: (L367-L417: .tmp 原子落盘)'
+            ],
+            jump: { scenario: 'audiocache', step: 1 }
+          },
+          {
+            id: 'Class-SPAVPlayerEngine',
+            name: 'SPAVPlayerEngine',
+            file: 'Spotify/Player/Engine/SPAVPlayerEngine.m:L26-L325',
+            role: 'SPAudioEngine 协议的 AVPlayer 具体实现',
+            provides: '封装 AVPlayer 与 AVPlayerItem 生命周期，通过 KVO 监听 status、loadedTimeRanges、timeControlStatus，通过 0.25s 周期观察者汇报进度，并内置 Seek 后 0.35s 防滑块闪回保护窗口',
+            methods: [
+              '-loadAsset:autoPlay: (L66-L92: 注册 KVO 与播放结束通知)',
+              '-seekToTime:completion: (L125-L158: kCMTimeZero 精准 Seek + pendingSeekTime 支持未就绪先拖进度条)',
+              '-handlePeriodicTime: (L284-L302: 0.35s withinGuard 过滤旧时间戳)'
+            ],
+            jump: { scenario: 'audiocache', step: 4 }
+          },
+          {
+            id: 'Class-SPPlayQueue',
+            name: 'SPPlayQueue',
+            file: 'Spotify/Player/SPPlayQueue.m:L14-L162',
+            role: '播放队列与 Fisher-Yates 锚点洗牌状态机',
+            provides: '同时维护 originalTracks（原始顺序）与 playOrderTracks（实际播放顺序）；开启随机播放时把当前正在听的 anchor 固定在 index 0，其余曲目做 Fisher-Yates 洗牌；支持「下一首播放」插队',
+            methods: [
+              '-replaceWithTracks:startIndex: (L50-L66)',
+              '-setShuffleEnabled: & -shuffledTracksFrom:anchor:anchorIndex: (L68-L96, L144-L160)',
+              '-insertNextTrack: (L98-L110)',
+              '-advanceToNextByAutoPlay: (L112-L126: 区分自然播完的单曲循环与手动点下一首)'
+            ],
+            jump: { scenario: 'audiocache', step: 3 }
+          },
+          {
+            id: 'Class-SPSystemMediaController',
+            name: 'SPSystemMediaController',
+            file: 'Spotify/Player/System/SPSystemMediaController.m:L20-L271',
+            role: 'iOS 系统音频会话、锁屏控制中心、灵动岛与中断恢复控制器',
+            provides: '激活 AVAudioSessionCategoryPlayback、处理来电打断自动恢复与拔耳机自动暂停、绑定 MPRemoteCommandCenter 远程指令、同步 MPNowPlayingInfoCenter 锁屏词曲与 SDImageCache 封面',
+            methods: [
+              '-setupAudioSession & -handleInterruption: & -handleRouteChange: (L58-L97)',
+              '-setupRemoteCommands (L101-L183: 禁用快进快退以确保灵动岛展示上下首)',
+              '-updateNowPlayingInfo & -loadArtworkForTrack: (L187-L270: 优先同步读 SDImageCache)'
+            ],
+            jump: { scenario: 'background', step: 1 }
+          }
+        ]
+      },
+      {
+        id: 'L4',
+        badge: 'L4 数据层',
+        title: 'Data 数据仓库与多音乐源层 (Spotify/Data/)',
+        subtitle: 'Repository 门面 + L3 缓存预热 + 网易云并发聚合解析 + 本地持久化仓库',
+        summary: 'Data 层通过 SPMusicDataSource 协议将「数据怎么来」与「数据怎么缓存和消费」彻底分开。SPMusicRepository 负责缓存与线程安全，SPNeteaseMusicSource 负责真实网络编排，SPMockMusicSource 负责离线仿真。',
+        nodes: [
+          {
+            id: 'Class-SPMusicRepository',
+            name: 'SPMusicRepository',
+            file: 'Spotify/Data/Repository/SPMusicRepository.m:L29-L316',
+            role: '数据层唯一门面 + L3 元数据 LRU 缓存中心 + 主线程回调调度器',
+            provides: '持有当前 source；内置 5 个 SPLRUCache（歌单/专辑/艺人/搜索/歌词）；首页数据返回时自动调用 warmCachesFromHomeSections: 预热详情缓存；通过 currentSource 指针比对防止切换数据源后旧请求窜入；通过 SP_MAIN_WORK 保证所有 UI 回调均在主线程',
+            methods: [
+              '-setSource: (L50-L58: 清空 L3 缓存与 L1 内存音频缓存并发送 SPMusicSourceDidChangeNotification)',
+              '-warmCachesFromHomeSections: (L148-L160: 首页预热歌单/专辑缓存)',
+              '-cachedPlaylistForId: / -cachedAlbumForId: (L70-L78: 供详情页首帧同步直出)'
+            ],
+            jump: { scenario: 'lru3', step: 3 }
+          },
+          {
+            id: 'Class-SPNeteaseMusicSource',
+            name: 'SPNeteaseMusicSource',
+            file: 'Spotify/Data/Netease/SPNeteaseMusicSource.m:L15-L1042',
+            role: '网易云音乐真实 API 数据源实现',
+            provides: '使用 dispatch_group_t 并发聚合多个端点构建首页与详情；实现 1018 综合搜索失败自动降级 /cloudsearch；实现 /song/url/v1 失败自动降级 /song/url；实现上滑分页 slots 有序槽位并发收集',
+            methods: [
+              '-fetchAllHomeSectionsWithCompletion: (L61-L177: 6路接口并发聚合)',
+              '-fetchHomeMoreSectionsForCategory:page:completion: (L376-L513: slots槽位锁保序)',
+              '-searchWithKeyword:completion: & -fallbackCloudSearchWithKeyword: (L666-L748)',
+              '-fetchPlayURLForTrack:completion: (L967-L1002: v1 + 旧版双保险)'
+            ],
+            jump: { scenario: 'network', step: 2 }
+          },
+          {
+            id: 'Class-SPNeteaseSession',
+            name: 'SPNeteaseSession & SPNeteaseParser',
+            file: 'Spotify/Data/Netease/SPNeteaseSession.m:L25-L156 & SPNeteaseParser.m',
+            role: 'Cookie 会话管理（防并发惊群）与防御性 JSON 解析器',
+            provides: 'SPNeteaseSession 管理 Keychain 用户 Cookie 与 12h 匿名游客 Cookie，用 pendingWaiters 队列合并启动时的并发匿名注册请求；SPNeteaseParser 提供类型安全的 dict/array/string 提取、HTTP 转 HTTPS 封面加 ?param=500y500 降采样参数、播客电台 dj: 前缀合成模型',
+            methods: [
+              'SPNeteaseSession: -ensureCookieWithClient:completion: (L109-L149)',
+              'SPNeteaseParser: +normalizedCoverURL:size: (L35-L46), +trackFromJSON:fallbackAlbum: (L120-L157)'
+            ],
+            jump: { scenario: 'network', step: 1 }
+          },
+          {
+            id: 'Class-SPLibraryAndHistoryStore',
+            name: 'SPLibraryStore & SPHistoryStore',
+            file: 'Spotify/Data/Repository/SPLibraryStore.m & SPHistoryStore.m',
+            role: '个人音乐库（点赞歌曲/自建歌单/关注艺人）与最近播放历史持久化仓库',
+            provides: 'SPLibraryStore 将点赞曲目、自建歌单（user_pl_ 前缀）、关注艺人通过 YYModel 序列化为 Documents/sp_user_library_v1.json，若已登录网易云还会在关注艺人时同步调用 /artist/sub；SPHistoryStore 在 NSUserDefaults 中维护最近 50 首播放记录（LRU 去重移至队首）',
+            methods: [
+              'SPLibraryStore: -toggleLikeTrack:, -createPlaylistWithName:desc:, -addTrack:toPlaylistId:, -localPlaylistWithId:',
+              'SPHistoryStore: -recordTrack: (SPPlayerService 每次成功加载曲目时自动调用)'
+            ],
+            jump: { scenario: 'lru3', step: 4 }
+          }
+        ]
+      },
+      {
+        id: 'L5',
+        badge: 'L5 基础与模型层',
+        title: 'Core 基础底座与 Models 领域模型层',
+        subtitle: '手写 O(1) 线程安全 LRU、轻量 HTTP 客户端、Keychain 认证、16x16 色相桶取色与 Runtime 扩展',
+        summary: 'Core 层提供零业务耦合的通用基础设施；Models 层定义纯净的领域模型（SPTrack / SPAlbum / SPPlaylist / SPArtist / SPLyricDocument），统一遵循 SPMediaItem 协议。',
+        nodes: [
+          {
+            id: 'Class-SPLRUCache',
+            name: 'SPLRUCache<KeyType, ObjectType>',
+            file: 'Spotify/Core/Cache/SPLRUCache.m:L33-L229',
+            role: '全项目三级缓存的通用算法底座：os_unfair_lock + 双向链表 + 哈希表',
+            provides: '支持 maxCount 与 maxCost 双重容量淘汰；命中时 O(1) 将节点移至表头；淘汰时先在锁内摘除收集、出锁后再触发 evictionHandler 严防死锁；支持收到系统内存警告自动减半清理',
+            methods: [
+              '-objectForKey: / -peekObjectForKey: (L107-L130)',
+              '-setObject:forKey:cost: (L136-L176: 双重阈值淘汰 + 锁外回调)',
+              '-handleMemoryWarning & -trimToCount: (L58-L62, L199-L215)',
+              '-allKeysInMRUOrder (L217-L227: 供 L2 磁盘缓存持久化 manifest.json)'
+            ],
+            jump: { scenario: 'lru3', step: 0 }
+          },
+          {
+            id: 'Class-SPHTTPClient',
+            name: 'SPHTTPClient',
+            file: 'Spotify/Core/Network/SPHTTPClient.m:L15-L145',
+            role: '基于 NSURLSession 的轻量 JSON 网络客户端',
+            provides: '统一封装 GET/POST、Query 参数拼接、cookie 参数透传、bypassCache 毫秒级 timestamp 防缓存注入、HTTP 状态码与业务 JSON code == 200 双重校验（并将非 200 的原始 JSON 塞入 error.userInfo[@"payload"] 供扫码轮询读取 801/802/803 状态）',
+            methods: [
+              '-GET:parameters:cookie:bypassCache:completion: (L43-L69)',
+              '-POST:parameters:cookie:completion: (L71-L93)',
+              '-executeRequest:completion: (L95-L143)'
+            ],
+            jump: { scenario: 'network', step: 0 }
+          },
+          {
+            id: 'Class-UIImageCategories',
+            name: 'UIImageView+SPCover & UIImage+SPDominantColor',
+            file: 'Spotify/Core/Extensions/UIImageView+SPCover.m & UIImage+SPDominantColor.m',
+            role: 'Runtime 关联对象防闪烁封面加载 + 16x16 像素 12 色相桶主色调提取算法',
+            provides: 'UIImageView+SPCover 用 objc_setAssociatedObject 绑定当前 URL 防止 Cell 复用重复重置，并按控件尺寸做 SDWebImage 缩略图降采样；UIImage+SPDominantColor 将图片绘制到 16x16 CGBitmapContext，剔除过暗/惨白像素后按饱和度加权归入 12 个色相桶，提取主色调并存入 200 容量 SPLRUCache',
+            methods: [
+              '-sp_setImageWithURLString:placeholderColor:completion: (UIImageView+SPCover.m:L40-L90)',
+              '+sp_extractDominantColorForImage:cacheKey:completion: & -sp_dominantColor (UIImage+SPDominantColor.m:L25-L154)'
+            ],
+            jump: { scenario: 'protocols', step: 0 }
+          },
+          {
+            id: 'Class-SPAuthAndLyrics',
+            name: 'SPAuthService / SPKeychainStore / SPLyricDocument',
+            file: 'Spotify/Core/Auth/SPAuthService.m & Spotify/Models/SPLyricModel.m',
+            role: 'Keychain 会话安全存储与正则表达式双语 LRC 歌词时间轴解析器',
+            provides: 'SPAuthService 将当前登录用户序列化存入系统 Keychain，切换用户或登出时自动清空 L3 元数据缓存并通知全端刷新；SPLyricDocument 解析 [mm:ss.xx] 时间标签，将原文与翻译按时间戳对齐，并提供二分/线性时间轴匹配 activeLineIndexForTime:',
+            methods: [
+              'SPAuthService: -restoreSessionFromKeychain, -persistUserSession:, -adoptAuthenticatedUser:',
+              'SPLyricDocument: +parseLRC:translationLRC:, -activeLineIndexForTime:'
+            ],
+            jump: { scenario: 'protocols', step: 5 }
+          }
+        ]
+      }
+    ];
+
+    // ==================== 数据模型：区块二（7 大专题路径与核心实现逻辑） ====================
+    const SCENARIOS = [
+      {
+        id: 'protocols',
+        badge: '① 协议供需与 Runtime',
+        title: '7 大协议接口供需关系 & OC Runtime 实战拆解',
+        overview: '针对你的第一个核心困惑：「这些协议提供的接口都提供给谁、怎么用，哪些类的哪些方法实现了这个功能，以及 Runtime 用在了哪」。下面沿着调用与通知两条主路径逐一拆解。',
+        steps: [
+          {
+            stepTitle: 'Runtime 关联对象防闪烁',
+            className: 'UIImageView (SPCover)',
+            methodName: '-sp_currentURLString / -sp_setImageWithURLString:placeholderColor:completion:',
+            file: 'Spotify/Core/Extensions/UIImageView+SPCover.m:L11-L90',
+            leftLayer: 'L5',
+            leftNode: 'Class-UIImageCategories',
+            painPoint: '在 UITableView / UICollectionView 高频刷新（比如播放进度更新或局部 reload）时，如果每次 configureWithItem: 都先把 imageView.image = nil 再重新异步设图，已显示封面的 Cell 会出现肉眼可见的闪白/闪黑。',
+            logic: [
+              '在分类中无法直接添加实例变量，因此利用 Objective-C Runtime 的 objc_getAssociatedObject / objc_setAssociatedObject 为每个 UIImageView 动态挂载 SPCoverCurrentURLKey 属性。',
+              '进入 -sp_setImageWithURLString: 时，先比对 [[self sp_currentURLString] isEqualToString:urlString] && self.image != nil。如果 URL 没变且图片已在，直接短路返回现有图片，实现 0 闪烁！',
+              '同时传入 SDWebImageContextImageThumbnailPixelSize 按视图宽度的像素值（上限 600px）在解码阶段直接硬件降采样，且仅当 cacheType == SDImageCacheTypeNone（网络首载）时才做 0.18s 淡入动画，内存/磁盘缓存命中时 0ms 直接赋值。'
+            ],
+            code: `static const void *SPCoverCurrentURLKey = &SPCoverCurrentURLKey;
+
+- (nullable NSString *)sp_currentURLString {
+    return objc_getAssociatedObject(self, SPCoverCurrentURLKey);
+}
+- (void)sp_setCurrentURLString:(nullable NSString *)urlString {
+    objc_setAssociatedObject(self, SPCoverCurrentURLKey, urlString, OBJC_ASSOCIATION_COPY_NONATOMIC);
+}
+
+// 短路防闪烁核心判断：
+if (urlString.length > 0 && [[self sp_currentURLString] isEqualToString:urlString] && self.image != nil) {
+    if (completion) completion(self.image);
+    return;
+}`
+          },
+          {
+            stepTitle: 'SPMusicDataSource 插座与装饰器',
+            className: 'SPMusicRepository / SPNeteaseMusicSource / SPMockMusicSource',
+            methodName: '@protocol SPMusicDataSource (12 个数据接口)',
+            file: 'Spotify/Data/SPMusicDataSource.h:L29-L72 & SPMusicRepository.m:L29-L316',
+            leftLayer: 'P0',
+            leftNode: 'Proto-SPMusicDataSource',
+            painPoint: '如果 HomeVC、SearchVC、DetailVC 直接调用网络请求并解析网易云 JSON，一旦服务器不可用或想切换本地 Mock 数据，所有 UI 控制器都要重写。',
+            logic: [
+              '【谁定义】SPMusicDataSource.h 定义了 12 个标准方法，返回值全部是纯净的领域模型（SPHomeSection / SPPlaylist / SPAlbum / SPArtist / SPTrack / SPLyricDocument）。',
+              '【谁实现】SPNeteaseMusicSource 负责调网易云 API 并用 SPNeteaseParser 转模型；SPMockMusicSource 负责读 mock_data.json 并用 YYModel 转模型。',
+              '【最妙的设计 —— 门面也实现同一个协议】SPMusicRepository 不仅持有 id<SPMusicDataSource> source，它自己也声明了 <SPMusicDataSource>！这在设计模式中叫「装饰器模式 (Decorator) + 门面模式 (Facade)」：UI 调 [SPMusicRepository shared] 的协议方法 -> Repository 先查 L3 SPLRUCache -> 未命中才转发给 self.source -> 结果回来后写入 L3 缓存并用 SP_MAIN_WORK 切回主线程回调给 UI。'
+            ],
+            code: `// AppDelegate.m 启动时注入具体实现：
+[SPMusicRepository shared].source = [SPNeteaseMusicSource new]; // 或 [SPMockMusicSource new]
+
+// SPMusicRepository.m 内部装饰器转发与防串台校验：
+id<SPMusicDataSource> currentSource = self.source;
+[currentSource fetchPlaylistWithId:playlistId completion:^(SPPlaylist *playlist, NSError *error) {
+    SP_MAIN_WORK(^{
+        if (weakSelf.source != currentSource) return; // 切换数据源后丢弃旧源回调
+        if (!error && playlist) [weakSelf.playlistCache setObject:playlist forKey:playlistId];
+        if (completion) completion(playlist, error);
+    });
+}];`
+          },
+          {
+            stepTitle: 'SPMediaItem 多态视图绑定',
+            className: 'SPTrack / SPAlbum / SPPlaylist / SPArtist',
+            methodName: '@protocol SPMediaItem (-mediaType, -title, -subtitle, -coverURL)',
+            file: 'Spotify/Models/SPMediaItem.h:L20-L31 & SPMediaCells.m:L147-L157',
+            leftLayer: 'P0',
+            leftNode: 'Proto-SPMediaItem',
+            painPoint: '首页卡片、搜索结果行、音乐库网格可能同时混排「歌单」「专辑」「歌手」「单曲」，如果每个 Cell 都写一堆 if ([item isKindOfClass:...])，UI 组件会极度臃肿。',
+            logic: [
+              '【谁实现】SPTrack、SPAlbum、SPPlaylist、SPArtist 四个模型类各自在 .m 中实现 SPMediaItem 协议。例如 SPPlaylist 的 -subtitle 自动拼接 @"歌单 · 创作者"（播客则拼接 @"播客 · 主播"），SPAlbum 的 -subtitle 自动拼接 @"专辑 · 歌手名"。',
+              '【给谁用】SPMediaCardCell、SPHomeShortcutCell、SPMediaRowView、UIImageView+SPCover 的入口参数全部声明为 (id<SPMediaItem>)item。',
+              'Cell 只需要读 item.title、item.subtitle、item.coverURL，再根据 item.mediaType == SPMediaTypeArtist 决定把封面切成圆形还是圆角矩形即可！'
+            ],
+            code: `// SPMediaCells.m: SPMediaCardCell 完全不知道具体模型类，只面向 SPMediaItem 协议
+- (void)configureWithItem:(id<SPMediaItem>)item {
+    BOOL circular = item.mediaType == SPMediaTypeArtist;
+    self.titleLabel.text = item.title;
+    self.subtitleLabel.text = item.subtitle;
+    self.coverView.layer.cornerRadius = circular ? CGRectGetWidth(self.coverView.bounds) / 2 : 6;
+    [self.coverView sp_setCoverWithItem:item];
+}`
+          },
+          {
+            stepTitle: 'SPPlayerObserver 多播动态派发',
+            className: 'SPPlayerService → 8 个 UI 观察者',
+            methodName: '-addObserver: / -notify:(SEL)selector',
+            file: 'Spotify/Player/SPPlayerService.m:L18, L68-L80',
+            leftLayer: 'P0',
+            leftNode: 'Proto-SPPlayerObserver',
+            painPoint: '当一首歌开始播放或进度更新时，RootVC（控制Mini条显隐）、MiniPlayer（小进度条）、NowPlaying（大进度条+歌词滚动）、DetailVC（列表行音律跳动）、HomeVC（顶部背景氛围色）需要同时响应。',
+            logic: [
+              '【容器选择】SPPlayerService 使用 _observers = [NSHashTable weakObjectsHashTable]。NSHashTable 的 weakObjects 特性利用 Runtime 弱引用表，当任意 ViewController pop 销毁时自动从表中置空移除，哪怕不在 dealloc 里写 removeObserver 也不会野指针崩溃或内存泄漏。',
+              '【Runtime 动态选择器派发】-notify:(SEL)selector 方法接收诸如 @selector(playerDidChangeTrack:) 的 SEL，遍历 self.observers.allObjects（先快照一份 NSArray 防止遍历中途增删崩溃），用 respondsToSelector: 检查后调用 performSelector:withObject:self。'
+            ],
+            code: `_observers = [NSHashTable weakObjectsHashTable];
+
+- (void)notify:(SEL)selector {
+    for (id<SPPlayerObserver> observer in self.observers.allObjects) {
+        if ([observer respondsToSelector:selector]) {
+            [observer performSelector:selector withObject:self];
+        }
+    }
+}`
+          },
+          {
+            stepTitle: 'SPAudioEngine 内核协议隔离',
+            className: 'SPPlayerService ↔ SPAVPlayerEngine',
+            methodName: '@protocol SPAudioEngine & @protocol SPAudioEngineDelegate',
+            file: 'Spotify/Player/Engine/SPAudioEngine.h:L16-L41',
+            leftLayer: 'P0',
+            leftNode: 'Proto-SPAudioEngine',
+            painPoint: 'AVPlayer 的 KVO（status / timeControlStatus / loadedTimeRanges）和 CMTime 换算非常繁琐，如果和播放队列洗牌、缓存预加载混在同一个类里，代码会突破上千行且无法替换底层解码器。',
+            logic: [
+              '【向下控制：SPAudioEngine】由 SPAVPlayerEngine 实现，只暴露 6 个干净的动作：-loadURL:autoPlay:、-loadAsset:autoPlay:、-play、-pause、-stop、-seekToTime:completion:，仅提供给 SPPlayerService 调用。',
+              '【向上汇报：SPAudioEngineDelegate】由 SPPlayerService 实现，SPAVPlayerEngine 将复杂的 KVO 和通知转化为 4 个标准化事件回调给 SPPlayerService：状态改变、进度/时长/缓冲更新、单曲播放完毕、播放失败。'
+            ],
+            code: `// SPPlayerService.m 初始化时组装引擎：
+_engine = [SPAVPlayerEngine new];
+_engine.delegate = self;
+
+// SPPlayerService 实现 SPAudioEngineDelegate 响应自然播完自动切歌：
+- (void)audioEngineDidFinishPlaying:(id<SPAudioEngine>)engine {
+    SPTrack *nextTrack = [self.queue advanceToNextByAutoPlay:YES];
+    if (nextTrack) [self startCurrentTrackWithAutoPlay:YES];
+}`
+          },
+          {
+            stepTitle: 'SPAuthProvider 认证双通道',
+            className: 'SPAuthService → SPLocalAuthProvider / SPNeteaseAuthProvider',
+            methodName: '@protocol SPAuthProvider & @protocol SPAuthObserver',
+            file: 'Spotify/Core/Auth/SPAuthService.m:L29-L145',
+            leftLayer: 'P0',
+            leftNode: 'Proto-SPAuthProvider',
+            painPoint: '真实网易云短信登录经常触发图形验证码或高频风控，开发调试时需要稳定的本地闭环登录，同时又要支持真实的网易云账号/扫码登录来同步个人歌单。',
+            logic: [
+              '【谁实现 SPAuthProvider】SPLocalAuthProvider 使用 Keychain + 随机 Salt + CommonCrypto CC_SHA256 实现本地注册/密码校验/6位验证码闭环（内置 demo@spotify.local / Spotify123 体验账号）；SPNeteaseAuthProvider 对接网易云 /login、/login/cellphone、/captcha/sent 以及二维码扫码登录（/login/qr/key -> create -> check）。',
+              '【谁消费 SPAuthObserver】登录或退出时，SPAuthService 调用 -notifyUserChanged 广播给 SPUserAvatarButton（刷新右上角头像首字母）、SPSideDrawerViewController（刷新抽屉昵称与 VIP 徽章）、SPLibraryViewController（重新拉取用户个人云歌单）和 SPSettingsViewController。'
+            ],
+            code: `- (void)persistUserSession:(nullable SPUser *)user {
+    self.currentUser = user;
+    if (user) [SPKeychainStore setData:[user yy_modelToJSONData] forKey:SPSessionKeychainKey];
+    else [SPKeychainStore deleteValueForKey:SPSessionKeychainKey];
+    [[SPMusicRepository shared] clearMetadataCaches];
+    [self notifyUserChanged]; // NSHashTable 多播通知所有 SPAuthObserver
+}`
+          }
+        ]
+      },
+      {
+        id: 'network',
+        badge: '② 网络申请与并发',
+        title: '网络申请、匿名 Cookie 防惊群与多路并发降级链路',
+        overview: '本项目没有依赖 AFNetworking，而是基于系统 NSURLSession 手写了一套针对网易云 API 特性深度定制的轻量网络层（SPHTTPClient + SPNeteaseSession + SPNeteaseMusicSource）。',
+        steps: [
+          {
+            stepTitle: 'Step 1: SPHTTPClient 定制封装',
+            className: 'SPHTTPClient',
+            methodName: '-GET:parameters:cookie:bypassCache:completion: & -executeRequest:completion:',
+            file: 'Spotify/Core/Network/SPHTTPClient.m:L17-L143',
+            leftLayer: 'L5',
+            leftNode: 'Class-SPHTTPClient',
+            painPoint: 'NeteaseCloudMusicApi 服务端默认对相同 URL 做 2 分钟缓存，且需要透传 cookie 参数；此外某些接口（如扫码检测 /login/qr/check）在返回 code=801/802 时虽非 200，但业务层仍需读取其 JSON payload。',
+            logic: [
+              '配置 NSURLSessionConfiguration：设置 requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData 且 HTTPShouldSetCookies = NO（手动精细管理 Cookie，避免系统 Cookie 池污染）。',
+              '当 bypassCache == YES（如获取实时播放地址、登录状态、用户歌单）时，自动生成毫秒级时间戳 timestamp=<ms> 拼入 URL Query，强制穿透服务端缓存。',
+              '在 -executeRequest:completion: 中统一解析 JSON 并检查 http.statusCode (200..299) 与 dict[@"code"] == 200；若不等于 200，构造 NSError 并将完整 dict 存入 userInfo[@"payload"]，既统一了错误处理，又保留了特殊状态码的载荷。'
+            ],
+            code: `if (cookie.length > 0) {
+    [items addObject:[NSURLQueryItem queryItemWithName:@"cookie" value:cookie]];
+}
+if (bypassCache) {
+    long long ts = (long long)([[NSDate date] timeIntervalSince1970] * 1000.0);
+    [items addObject:[NSURLQueryItem queryItemWithName:@"timestamp" value:[NSString stringWithFormat:@"%lld", ts]]];
+}`
+          },
+          {
+            stepTitle: 'Step 2: 匿名 Cookie 并发防惊群',
+            className: 'SPNeteaseSession',
+            methodName: '-ensureCookieWithClient:completion:',
+            file: 'Spotify/Data/Netease/SPNeteaseSession.m:L109-L149',
+            leftLayer: 'L4',
+            leftNode: 'Class-SPNeteaseSession',
+            painPoint: 'App 冷启动进入首页时，HomeVC、SearchVC、预热播放器会同时发起多个请求。此时若未登录且本地无游客 Cookie，如果每个请求都去调一次 /register/anonimous，会瞬间打出多次重复注册并互相覆盖 Cookie（惊群效应）。',
+            logic: [
+              '优先检查 activeCookie：若 Keychain 中有已登录的 userCookie 则直接用；否则检查 NSUserDefaults 中未满 12 小时（SPAnonCookieTTL）的 anonymousCookie。',
+              '若两者皆无，进入 @synchronized(self) 临界区：将当前请求的回调 block 加入 self.pendingWaiters 数组，并检查 self.fetchingAnonCookie 标志位。',
+              '只有第一个进入的请求会把 fetchingAnonCookie 置为 YES 并真正发起 /register/anonimous 网络请求；后续并发请求直接入队返回。待网络请求返回后，遍历 waiters 一次性唤醒所有挂起的业务请求！'
+            ],
+            code: `@synchronized (self) {
+    if (completion) [self.pendingWaiters addObject:[completion copy]];
+    if (!self.fetchingAnonCookie) {
+        self.fetchingAnonCookie = YES;
+        shouldStart = YES;
+    }
+}
+if (!shouldStart) return; // 后续并发请求直接排队等待，不重复发网络请求`
+          },
+          {
+            stepTitle: 'Step 3: dispatch_group 6路并发聚合首页',
+            className: 'SPNeteaseMusicSource',
+            methodName: '-fetchAllHomeSectionsWithCompletion:',
+            file: 'Spotify/Data/Netease/SPNeteaseMusicSource.m:L61-L177',
+            leftLayer: 'L4',
+            leftNode: 'Class-SPNeteaseMusicSource',
+            painPoint: 'Spotify 首页包含顶部 8 宫格快捷入口、为你推荐、精选播客、热门歌单、最新专辑、热门艺人 6 大区块，对应网易云 6 个不同的 API 端点。如果串行请求，首屏耗时会高达 2~3 秒。',
+            logic: [
+              '创建 dispatch_group_t group，连续发起 6 个并行 GET 请求：/toplist、/personalized、/dj/hot、/top/playlist、/album/newest、/top/artists，每个请求前 dispatch_group_enter(group)，回调内用 SPNeteaseParser 解析成模型数组后 dispatch_group_leave(group)。',
+              '在 dispatch_group_notify 中汇总 6 路结果：抽取榜单前 4 + 推荐前 4 拼成 SPHomeSectionStyleShortcut 双列网格，其余依次组装成横向滚动的 SPHomeSection。',
+              '部分容错策略：只要 6 路接口中有任意一路成功返回（sections.count > 0），首页就能正常渲染展示，不会因为单个非核心接口偶发超时而导致整页报错白屏。'
+            ],
+            code: `dispatch_group_t group = dispatch_group_create();
+dispatch_group_enter(group);
+[weakSelf.client GET:@"/toplist" ... completion:^(NSDictionary *json, NSError *err) {
+    if (json) toplists = [SPNeteaseParser playlistsFromArray:json[@"list"]];
+    dispatch_group_leave(group);
+}];
+// ... 其余 5 路并发请求 ...
+dispatch_group_notify(group, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    // 按固定顺序组装 SPHomeSection 数组并回调
+});`
+          },
+          {
+            stepTitle: 'Step 4: 搜索与播放地址双级自动降级',
+            className: 'SPNeteaseMusicSource',
+            methodName: '-searchWithKeyword:completion: & -fetchPlayURLForTrack:completion:',
+            file: 'Spotify/Data/Netease/SPNeteaseMusicSource.m:L666-L748, L967-L1002',
+            leftLayer: 'L4',
+            leftNode: 'Class-SPNeteaseMusicSource',
+            painPoint: '第三方网易云 API 节点有时对综合搜索 /search?type=1018 返回空，或对新版 /song/url/v1 解析不出音频流 URL。',
+            logic: [
+              '【搜索降级链路】先请求单接口综合搜索 /search?type=1018（一次拿齐单曲/歌手/专辑/歌单）；若报错或解析出的 parsed.isEmpty 为真，自动无缝调用 -fallbackCloudSearchWithKeyword:cookie:completion:，用 dispatch_group 并发请求 4 个 /cloudsearch (type=1/100/10/1000) 兜底。',
+              '【播放 URL 降级链路】播放前实时请求 /song/url/v1?level=standard（bypassCache:YES）；若返回的 url 为空，立即自动降级请求旧版 /song/url?br=320000；若仍为空，则统一包装为 SPMusicErrorNoCopyright (451) 交由播放器自动跳歌。'
+            ],
+            code: `NSURL *resolved = [weakSelf extractURLFromSongURLPayload:json];
+if (resolved) { completion(resolved, nil); return; }
+// 自动兜底请求旧版 /song/url
+[weakSelf.client GET:@"/song/url" parameters:@{@"id": track.identifier, @"br": @320000}
+              cookie:cookie bypassCache:YES completion:^(NSDictionary *fallbackJson, NSError *fallbackErr) { ... }];`
+          }
+        ]
+      },
+      {
+        id: 'lru3',
+        badge: '③ 三级 LRU 缓存体系',
+        title: '手写 O(1) SPLRUCache 与 L1 / L2 / L3 三级缓存架构',
+        overview: '为了做到「切歌 0 等待、进详情页 0 跳动、切分类 0 重新请求、内存峰值可控」，项目从底层手写了线程安全的 SPLRUCache，并在此之上构建了 L1（内存音频）、L2（磁盘音频）、L3（元数据与封面主色调）三级缓存体系。',
+        steps: [
+          {
+            stepTitle: '底座: O(1) 双向链表 SPLRUCache',
+            className: 'SPLRUCache<KeyType, ObjectType>',
+            methodName: '-objectForKey: / -setObject:forKey:cost: / -trimToCount:',
+            file: 'Spotify/Core/Cache/SPLRUCache.m:L20-L215',
+            leftLayer: 'L5',
+            leftNode: 'Class-SPLRUCache',
+            painPoint: '系统 NSCache 的淘汰策略是黑盒且不支持精确的 MRU 顺序导出（无法同步给磁盘做持久化索引），也不支持在淘汰时安全触发自定义清理回调。',
+            logic: [
+              '【数据结构】NSMutableDictionary *map 存 key -> SPLRUNode* 指针（保证 O(1) 查找）；SPLRUNode 构成带 head（最新使用 MRU）和 tail（最久未用 LRU）的双向链表（保证 O(1) 头插与尾删）。',
+              '【锁与防死锁】采用 iOS 底层高性能 os_unfair_lock 保护链表与字典操作；当写入触发 while (count > maxCount || totalCost > maxCost) 淘汰时，在锁内只把淘汰节点 popTail 收集到局部变量 evicted 数组，等 os_unfair_lock_unlock(&_lock) 解锁之后再遍历调用 self.evictionHandler(node.key, node.value)，彻底杜绝回调函数重入导致的死锁！',
+              '【内存警告自愈】默认监听 UIApplicationDidReceiveMemoryWarningNotification，收到系统内存告警时自动调用 [self trimToCount:self.count / 2] 释放一半最旧缓存。'
+            ],
+            code: `while (self.map.count > self.maxCount || (self.map.count > 0 && self.totalCost > self.maxCost)) {
+    SPLRUNode *removed = [self popTail];
+    if (!removed) break;
+    if (self.evictionHandler) {
+        if (!evicted) evicted = [NSMutableArray array];
+        [evicted addObject:removed];
+    }
+}
+os_unfair_lock_unlock(&_lock);
+// 必须在锁外触发淘汰回调，保证线程安全可重入
+for (SPLRUNode *node in evicted) {
+    self.evictionHandler(node.key, node.value);
+}`
+          },
+          {
+            stepTitle: 'L1: 内存音频热缓存 (15分钟 TTL)',
+            className: 'SPAudioCacheManager',
+            methodName: 'resolvedURLCache (64条) + assetCache (6首)',
+            file: 'Spotify/Player/Cache/SPAudioCacheManager.m:L10-L122',
+            leftLayer: 'L3',
+            leftNode: 'Class-SPAudioCacheManager',
+            painPoint: '网易云通过 /song/url/v1 返回的 CDN 音频流 URL 带有防盗链签名，约 15~20 分钟后即失效 403；如果只缓存 AVURLAsset 而不校验 URL 寿命，暂停半小时再播就会失败。',
+            logic: [
+              'L1 分为两个 SPLRUCache 容器：resolvedURLCache（上限 64 条，存储封装了 url 与 CFAbsoluteTimeGetCurrent() 时间戳的 SPCachedRemoteURL）和 assetCache（上限 6 首，存储已预热好容器头的 AVURLAsset）。',
+              '读取 L1 时通过 -validCachedURLForSafeKey:peekOnly: 检查 (now - entry.cachedAt) >= 15 * 60.0 (SPAudioURLCacheTTL)：一旦满 15 分钟，立即将 resolvedURLCache 和 assetCache 中的对应条目双双剔除，强制重新向数据源拉取新签名 URL。'
+            ],
+            code: `- (nullable NSURL *)validCachedURLForSafeKey:(NSString *)safeKey peekOnly:(BOOL)peekOnly {
+    SPCachedRemoteURL *entry = peekOnly ? [self.resolvedURLCache peekObjectForKey:safeKey]
+                                        : [self.resolvedURLCache objectForKey:safeKey];
+    if (!entry) return nil;
+    if ((CFAbsoluteTimeGetCurrent() - entry.cachedAt) >= SPAudioURLCacheTTL) { // 15分钟过期
+        [self.resolvedURLCache removeObjectForKey:safeKey];
+        [self.assetCache removeObjectForKey:safeKey];
+        return nil;
+    }
+    return entry.url;
+}`
+          },
+          {
+            stepTitle: 'L2: 磁盘音频文件 LRU (40首 / 200MB)',
+            className: 'SPAudioCacheManager',
+            methodName: 'diskIndexCache + manifest.json + evictionHandler',
+            file: 'Spotify/Player/Cache/SPAudioCacheManager.m:L63-L251',
+            leftLayer: 'L3',
+            leftNode: 'Class-SPAudioCacheManager',
+            painPoint: '音频文件落盘后，App 重启如何恢复上次的 LRU 访问热度顺序？磁盘超过 200MB 时如何自动删掉最久没听的那首歌？',
+            logic: [
+              '用 SPLRUCache *diskIndexCache = [[SPLRUCache alloc] initWithMaxCount:40 maxCost:200 * 1024 * 1024] 作为磁盘文件的内存索引（其中 key 为 safeKey，value 和 cost 均为文件字节数 fileSize），并设置 trimsOnMemoryWarning = NO（防止内存警告误删磁盘索引）。',
+              '每次命中或新落盘音频文件时，调用 -persistManifestAsync 将 [self.diskIndexCache allKeysInMRUOrder] 序列化写入 Caches/SPAudioCache/manifest.json；下次 App 启动在 -setupDiskCache 中按 reverseObjectEnumerator 逆序重新插入 diskIndexCache，完美复原跨进程的 MRU 顺序！',
+              '当磁盘总大小超过 200MB 或曲目数超过 40 首时，diskIndexCache 自动触发 evictionHandler，在串行 ioQueue 上异步调用 removeItemAtPath: 删除被淘汰的本地音频文件。'
+            ],
+            code: `_diskIndexCache = [[SPLRUCache alloc] initWithMaxCount:SPAudioL2DiskMaxCount maxCost:SPAudioL2DiskMaxBytes];
+_diskIndexCache.trimsOnMemoryWarning = NO;
+_diskIndexCache.evictionHandler = ^(NSString *key, NSNumber *size) {
+    [weakSelf deleteDiskFileForSafeKey:key]; // 自动删除超出 200MB/40首 的最旧音频文件
+};`
+          },
+          {
+            stepTitle: 'L3-A: 元数据缓存与首页预热',
+            className: 'SPMusicRepository',
+            methodName: 'playlistCache / albumCache / artistTracksCache / searchCache / lyricsCache',
+            file: 'Spotify/Data/Repository/SPMusicRepository.m:L19-L48, L148-L160',
+            leftLayer: 'L4',
+            leftNode: 'Class-SPMusicRepository',
+            painPoint: '用户在首页看到歌单卡片点击进入 SPDetailViewController，如果每次都重新发网络请求且等待期间表头没有曲目列表，详情页会出现闪烁和布局跳动。',
+            logic: [
+              'SPMusicRepository 内置 5 个 L3 SPLRUCache：playlistCache(50)、albumCache(50)、artistTracksCache(40)、searchCache(60)、lyricsCache(60)。',
+              '当首页数据返回时，立即调用 -warmCachesFromHomeSections:，把首页已经附带了 tracks 的歌单/专辑提前塞进 playlistCache / albumCache。',
+              'SPDetailViewController 在 -initWithMediaItem: 阶段同步调用 [[SPMusicRepository shared] cachedPlaylistForId:]，若命中则首帧直接拿到完整 tracks 渲染表头与列表，连骨架屏都无需闪现！'
+            ],
+            code: `// SPDetailViewController.m:L53 首帧同步直出：
+SPPlaylist *cached = [[SPMusicRepository shared] cachedPlaylistForId:item.identifier];
+if (cached.tracks.count > 0) {
+    _mediaItem = cached;
+    _tracks = cached.tracks;
+}`
+          },
+          {
+            stepTitle: 'L3-B: 16x16 色相桶封面取色缓存',
+            className: 'UIImage (SPDominantColor)',
+            methodName: '+sp_extractDominantColorForImage:cacheKey:completion: & -sp_dominantColor',
+            file: 'Spotify/Core/Extensions/UIImage+SPDominantColor.m:L11-L154',
+            leftLayer: 'L5',
+            leftNode: 'Class-UIImageCategories',
+            painPoint: '首页顶部氛围光、详情页渐变背景、MiniPlayer 底色、全屏播放页背景都需要跟随封面主色调实时变化。若对原图逐像素遍历求均值，既耗时又容易算出灰扑扑的泥巴色。',
+            logic: [
+              '使用容量为 200 的静态 SPLRUCache (+sp_colorCache) 缓存 URL -> UIColor* 映射，命中时主线程 0ms 同步返回。',
+              '未命中时在后台队列将图片用 CGBitmapContext 绘制缩小到 16×16 = 256 个像素。',
+              '遍历 256 个像素：剔除极暗（maxC < 38）和近白高光（delta < 22 && maxC > 220）像素；以 weight = 1.0 + sat * 2.0 给高饱和度色彩加权，按色相角 Hue (0~1) 投入 12 个色相桶（kBucketCount = 12）；取权重最高色相桶的加权平均 RGB，最后通过 -sp_clampedForDarkBackground 钳制明度，保证白色文字在其上永远清晰可读！'
+            ],
+            code: `// 12 个色相桶，按饱和度加权，避免灰黑/纯白主宰结果
+double sat = maxC > 0 ? (delta / maxC) : 0;
+double weight = 1.0 + sat * 2.0;
+NSInteger bucket = MIN((NSInteger)(hue * bucketCount), bucketCount - 1);
+bucketWeight[bucket] += weight;
+bucketR[bucket] += r * weight; ...`
+          }
+        ]
+      },
+      {
+        id: 'audiocache',
+        badge: '④ 歌曲缓存与0ms预加载',
+        title: '歌曲播放解析漏斗、防竞态 Ticket 与上下首 0ms 预加载全链路',
+        overview: '当你点击一首歌或在 MiniPlayer 横滑切歌时，项目是如何做到「已缓存歌曲 0ms 秒播、未缓存歌曲边播边落盘、相邻歌曲提前预热就绪」的？下面是完整的 5 步执行链路。',
+        steps: [
+          {
+            stepTitle: 'Step 1: loadTicket 令牌防切歌竞态',
+            className: 'SPPlayerService',
+            methodName: '-startCurrentTrackWithAutoPlay:',
+            file: 'Spotify/Player/SPPlayerService.m:L234-L284',
+            leftLayer: 'L3',
+            leftNode: 'Class-SPPlayerService',
+            painPoint: '用户连续快速狂点「下一首」（A -> B -> C），A 和 B 的播放地址网络请求还在路上。如果 A 的 URL 比 C 晚返回，没有防护的播放器就会把画面显示为 C、声音却播着 A（音画串台）！',
+            logic: [
+              'SPPlayerService 维护一个单调递增的整型属性 @property (nonatomic, assign) NSUInteger loadTicket。',
+              '每次进入 -startCurrentTrackWithAutoPlay:（或调用 -pause 取消加载中曲目）时，立刻执行 self.loadTicket += 1，并用栈局部变量 NSUInteger ticket = self.loadTicket 捕获本次请求令牌。',
+              '当 SPAudioCacheManager 异步回调返回 AVURLAsset 时，第一行就检查 if (ticket != weakSelf.loadTicket) return; —— 所有被超越的旧切歌回调全部静默作废！'
+            ],
+            code: `self.loadTicket += 1;
+NSUInteger ticket = self.loadTicket;
+...
+[[SPAudioCacheManager shared] resolvePlayableAssetForTrack:track
+                                                completion:^(AVURLAsset *asset, BOOL isCacheHit, NSError *error) {
+    if (ticket != weakSelf.loadTicket) return; // 令牌过期，直接丢弃！
+    ...
+}];`
+          },
+          {
+            stepTitle: 'Step 2: 三级命中漏斗解析 AVURLAsset',
+            className: 'SPAudioCacheManager',
+            methodName: '-resolvePlayableAssetForTrack:completion:',
+            file: 'Spotify/Player/Cache/SPAudioCacheManager.m:L270-L332',
+            leftLayer: 'L3',
+            leftNode: 'Class-SPAudioCacheManager',
+            painPoint: '如何把本地磁盘文件、内存预热 Asset、内存有效 URL 和实时网络请求串联成一条无感知的统一管道？',
+            logic: [
+              '第 1 级（最快，0ms）：查 L2 本地磁盘文件 -diskFileURLIfExistsForSafeKey:。若 Caches/SPAudioCache/<safeKey>.mp3 已存在，直接用本地 fileURL 创建 AVURLAsset 返回，无需任何网络消耗！',
+              '第 2 级（次快，内存直出）：查 L1 self.assetCache。若预加载阶段已经创建并预热过 AVURLAsset 且其对应的远程 URL 未超过 15 分钟 TTL，直接返回该 memAsset，同时确保后台落盘任务启动。',
+              '第 3 级（省去 API 请求）：查 L1 self.resolvedURLCache。若 URL 仍在 15 分钟有效期内，直接包装成 AVURLAsset 返回并启动后台落盘。',
+              '第 4 级（兜底实时请求）：调用 [[SPMusicRepository shared] fetchPlayURLForTrack:track completion:] 实时换取播放 URL，拿到后写入 L1 URL 缓存与 Asset 缓存，立即交给 AVPlayer 流式起播，同时派发后台下载任务。'
+            ],
+            code: `// 1. 优先命中 L2 本地磁盘音频文件（0ms 本地秒播）
+NSURL *localURL = [self diskFileURLIfExistsForSafeKey:safeKey];
+if (localURL) {
+    AVURLAsset *localAsset = [AVURLAsset URLAssetWithURL:localURL options:nil];
+    [self.assetCache setObject:localAsset forKey:safeKey cost:1];
+    completion(localAsset, YES, nil);
+    return;
+}
+// 2. 命中 L1 内存预热好的 AVURLAsset -> 3. 命中有效 L1 URL -> 4. Repository 实时请求`
+          },
+          {
+            stepTitle: 'Step 3: 低优先级后台下载与 .tmp 原子落盘',
+            className: 'SPAudioCacheManager',
+            methodName: '-downloadToDiskInBackgroundForSafeKey:remoteURL:',
+            file: 'Spotify/Player/Cache/SPAudioCacheManager.m:L367-L417',
+            leftLayer: 'L3',
+            leftNode: 'Class-SPAudioCacheManager',
+            painPoint: '如果后台缓存下载与当前正在流式播放的 AVPlayer 争抢带宽，会导致当前播放卡顿；如果下载到一半 App 被杀，残缺的 .mp3 文件会导致下次播放失败。',
+            logic: [
+              '【防并发重复下载】所有下载调度都进入串行队列 self.ioQueue，并用 self.activeDownloads[safeKey] 字典记录正在下载的 task，同一首歌绝不重复发起下载。',
+              '【带宽礼让】将 NSURLSessionDownloadTask 的优先级设为 task.priority = NSURLSessionTaskPriorityLow，且 downloadSession 限制 HTTPMaximumConnectionsPerHost = 3，优先保障前台流媒体起播。',
+              '【.tmp 原子落盘】下载完成回调时，先将系统临时文件拷贝到 <finalPath>.tmp，校验成功后调用 [fm moveItemAtPath:tmpPath toPath:finalPath error:nil] 原子重命名，最后记录文件大小到 diskIndexCache 并更新 manifest.json。即使中途崩溃，残余的 .tmp 也会在下次启动 -setupDiskCache 时被自动清理。'
+            ],
+            code: `NSString *tmpPath = [finalPath stringByAppendingString:@".tmp"];
+if ([fm copyItemAtURL:location toURL:[NSURL fileURLWithPath:tmpPath] error:nil]) {
+    [fm removeItemAtPath:finalPath error:nil];
+    if ([fm moveItemAtPath:tmpPath toPath:finalPath error:nil]) {
+        [strongSelf.diskIndexCache setObject:@(fileSize) forKey:safeKey cost:(NSUInteger)fileSize];
+        [strongSelf persistManifestAsync];
+    }
+}`
+          },
+          {
+            stepTitle: 'Step 4: 上下首相邻曲目静默预加载',
+            className: 'SPPlayerService → SPAudioCacheManager',
+            methodName: '-preloadAdjacentTracks & -preloadTracks: & -warmupAssetAndDiskForSafeKey:remoteURL:',
+            file: 'Spotify/Player/SPPlayerService.m:L302-L312 & SPAudioCacheManager.m:L334-L365',
+            leftLayer: 'L3',
+            leftNode: 'Class-SPAudioCacheManager',
+            painPoint: '为什么用户在 MiniPlayer 或大播放页横滑切到下一首/上一首时能做到几乎 0 延迟起播？',
+            logic: [
+              '触发时机有 3 处：① 当前曲目成功解析出 Asset 开始播放时（SPPlayerService.m:L282）；② 用户点击切换随机播放模式洗牌队列后（L222）；③ 用户点击「下一首播放」插队新歌时（L146）。',
+              '-preloadAdjacentTracks 从 SPPlayQueue 取出当前顺序下的 nextTrack 和 previousTrack，传给 [[SPAudioCacheManager shared] preloadTracks:adjacent]。',
+              'preloadTracks: 提前在后台请求这两首歌的播放 URL，创建 AVURLAsset 存入 L1 assetCache，并调用 [asset loadValuesAsynchronouslyForKeys:@[@"playable", @"duration"] completionHandler:nil] 提前完成 HTTP 握手与音频容器 Moov/ID3 头部解析，同时调用 downloadToDiskInBackground 提前把音频文件下载到 L2 磁盘！'
+            ],
+            code: `- (void)warmupAssetAndDiskForSafeKey:(NSString *)safeKey remoteURL:(NSURL *)remoteURL {
+    if (![self.assetCache peekObjectForKey:safeKey]) {
+        AVURLAsset *asset = [AVURLAsset URLAssetWithURL:remoteURL options:nil];
+        [self.assetCache setObject:asset forKey:safeKey cost:1];
+        // 关键：提前异步预热音频流 playable 与 duration 属性，切歌时 AVPlayerItem 秒进 ReadyToPlay
+        [asset loadValuesAsynchronouslyForKeys:@[@"playable", @"duration"] completionHandler:nil];
+    }
+    [self downloadToDiskInBackgroundForSafeKey:safeKey remoteURL:remoteURL];
+}`
+          },
+          {
+            stepTitle: 'Step 5: SPAVPlayerEngine KVO 驱动与防滑块闪回',
+            className: 'SPAVPlayerEngine',
+            methodName: '-loadAsset:autoPlay: / -handleItemStatusChanged / -handlePeriodicTime:',
+            file: 'Spotify/Player/Engine/SPAVPlayerEngine.m:L66-L302',
+            leftLayer: 'L3',
+            leftNode: 'Class-SPAVPlayerEngine',
+            painPoint: '使用 AVPlayer 时有两个经典坑：① 歌曲还在 Loading 时用户就拖动了进度条，等 ReadyToPlay 后进度被重置回 0；② 用户松手 Seek 后的一瞬间，AVPlayer 的周期观察者偶发还会吐出一帧旧时间戳，导致进度条滑块瞬间往回跳一下（闪回）。',
+            logic: [
+              '【未就绪先 Seek 记忆】当 currentItem.status != AVPlayerItemStatusReadyToPlay 时调用 -seekToTime:，引擎将目标秒数暂存在 self.pendingSeekTime 并立即乐观更新 UI 进度；等 KVO 监听到 status == AVPlayerItemStatusReadyToPlay 时，优先读取 pendingSeekTime 执行真正的精准 Seek (toleranceBefore/After: kCMTimeZero) 后再起播。',
+              '【0.35s 防闪回护栏】在 -seekToTime: 完成回调中记录 self.lastSeekTargetTime 与 self.lastSeekTimestamp = CFAbsoluteTimeGetCurrent()；在 0.25s 一次的 -handlePeriodicTime: 中，若距离刚松手不足 0.35s 且吐出的时间与目标时间偏差超过 1.5s，直接丢弃该帧旧时间戳！'
+            ],
+            code: `// Seek 刚释放后 0.35s 内过滤 AVPlayer 偶发吐出的旧时间戳，避免滑块闪回
+BOOL withinGuard = (CFAbsoluteTimeGetCurrent() - self.lastSeekTimestamp < 0.35);
+if (!(withinGuard && fabs(seconds - self.lastSeekTargetTime) > 1.5)) {
+    self.currentTime = seconds;
+}`
+          }
+        ]
+      },
+      {
+        id: 'background',
+        badge: '⑤ 后台播放与灵动岛',
+        title: '后台播放保活、锁屏控制中心、灵动岛与音频中断恢复',
+        overview: '在 iOS 上实现媲美原生音乐 App 的后台播放体验，不仅要配 Info.plist，还要处理后台自动切歌时的网络空窗期挂起风险、锁屏/灵动岛按钮定制、高频 IPC 节流以及来电/拔耳机中断。',
+        steps: [
+          {
+            stepTitle: 'Step 1: Info.plist 声明与 AVAudioSession 激活',
+            className: 'Info.plist / SPAVPlayerEngine / SPSystemMediaController',
+            methodName: '-activateAudioSession',
+            file: 'Spotify/Resources/Info.plist:L42-L45 & SPSystemMediaController.m:L58-L70',
+            leftLayer: 'L3',
+            leftNode: 'Class-SPSystemMediaController',
+            painPoint: '默认情况下 iOS App 退到后台或锁屏后音频会立即被静音挂起。',
+            logic: [
+              '① 在 Info.plist 中配置 UIBackgroundModes -> <string>audio</string>。',
+              '② 在 SPAVPlayerEngine 初始化时设置 _player.audiovisualBackgroundPlaybackPolicy = AVPlayerAudiovisualBackgroundPlaybackPolicyContinuesIfPossible。',
+              '③ 在 SPSystemMediaController 中将 AVAudioSession 设为 AVAudioSessionCategoryPlayback 并调用 setActive:YES；同时监听 UIApplicationDidEnterBackgroundNotification，在退后台瞬间若处于播放或加载态，再次确认激活 AudioSession 并刷新锁屏信息。'
+            ],
+            code: `- (void)activateAudioSession {
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    NSError *error = nil;
+    [session setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeDefault options:0 error:&error];
+    [session setActive:YES error:&error];
+}`
+          },
+          {
+            stepTitle: 'Step 2: 后台切歌空窗期 UIBackgroundTask 保活',
+            className: 'SPPlayerService',
+            methodName: '-beginTransitionBackgroundTask / -endTransitionBackgroundTask',
+            file: 'Spotify/Player/SPPlayerService.m:L258, L286-L300, L330-L332',
+            leftLayer: 'L3',
+            leftNode: 'Class-SPPlayerService',
+            painPoint: '【极易踩坑的真机 Bug】当手机锁屏在后台播完第 1 首歌、准备自动切第 2 首歌时，如果第 2 首歌尚未命中本地磁盘缓存，需要发起异步网络请求 /song/url/v1 换取播放地址。在这几百毫秒的网络请求空窗期内，AVPlayer 处于停止状态，iOS 系统会以为音乐已经播完，直接把 App 进程挂起（Suspend），导致后台无法自动切下一首！',
+            logic: [
+              '在 -startCurrentTrackWithAutoPlay:YES 进入异步解析前，立即调用 [self beginTransitionBackgroundTask]，通过 [[UIApplication sharedApplication] beginBackgroundTaskWithName:@"SPTrackTransition" expirationHandler:...] 向 iOS 内核申请后台过渡执行豁免权。',
+              '一旦新曲目加载完成进入 SPPlaybackStatePlaying（或失败进入 Failed/Paused），在 -updateState: 中检测到 state != SPPlaybackStateLoading，立即调用 [self endTransitionBackgroundTask] 归还后台任务句柄，既保证后台切歌百发百中，又绝不违规占用后台时长。'
+            ],
+            code: `- (void)beginTransitionBackgroundTask {
+    [self endTransitionBackgroundTask];
+    __weak typeof(self) weakSelf = self;
+    self.transitionBackgroundTaskId = [[UIApplication sharedApplication]
+        beginBackgroundTaskWithName:@"SPTrackTransition"
+                  expirationHandler:^{ [weakSelf endTransitionBackgroundTask]; }];
+}`
+          },
+          {
+            stepTitle: 'Step 3: 锁屏/灵动岛按钮控制 (MPRemoteCommandCenter)',
+            className: 'SPSystemMediaController',
+            methodName: '-setupRemoteCommands',
+            file: 'Spotify/Player/System/SPSystemMediaController.m:L101-L183',
+            leftLayer: 'L3',
+            leftNode: 'Class-SPSystemMediaController',
+            painPoint: '为什么很多自研播放器在锁屏界面或灵动岛上显示的不是「上一首 / 下一首」按钮，而是变成了「快退15秒 / 快进15秒」，或者锁屏进度条无法拖动？',
+            logic: [
+              '调用 [[UIApplication sharedApplication] beginReceivingRemoteControlEvents] 开启远程控制事件接收。',
+              '【关键细节】显式将 skipForwardCommand、skipBackwardCommand、seekForwardCommand、seekBackwardCommand 的 enabled 设为 NO！这样 iOS 锁屏与灵动岛就会稳定展示标准的上一首（previousTrackCommand）和下一首（nextTrackCommand）按钮。',
+              '注册 playCommand、pauseCommand、togglePlayPauseCommand（AirPods 捏合触发）、nextTrackCommand、previousTrackCommand，以及 changePlaybackPositionCommand（用户在锁屏界面直接拖拽进度条时读取 MPChangePlaybackPositionCommandEvent.positionTime 调用 [playerService seekToTime:]）。'
+            ],
+            code: `// 禁用快进/快退，确保锁屏和灵动岛稳定展示上一首/下一首按钮
+center.skipForwardCommand.enabled = NO;
+center.skipBackwardCommand.enabled = NO;
+center.seekForwardCommand.enabled = NO;
+center.seekBackwardCommand.enabled = NO;
+
+center.changePlaybackPositionCommand.enabled = YES;
+[center.changePlaybackPositionCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *event) {
+    NSTimeInterval position = ((MPChangePlaybackPositionCommandEvent *)event).positionTime;
+    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf.playerService seekToTime:position]; });
+    return MPRemoteCommandHandlerStatusSuccess;
+}];`
+          },
+          {
+            stepTitle: 'Step 4: MPNowPlayingInfoCenter 5秒节流与封面秒出',
+            className: 'SPPlayerService & SPSystemMediaController',
+            methodName: '-syncNowPlayingInfoForce: & -updateNowPlayingInfo & -loadArtworkForTrack:',
+            file: 'Spotify/Player/SPPlayerService.m:L337-L345 & SPSystemMediaController.m:L187-L270',
+            leftLayer: 'L3',
+            leftNode: 'Class-SPSystemMediaController',
+            painPoint: 'AVPlayer 每 0.25 秒回调一次进度，如果每秒向 MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo 写入 4 次字典，会触发频繁的跨进程 IPC 通信甚至被系统限流丢弃。',
+            logic: [
+              '【为什么锁屏进度条不用每秒推 4 次也能自己走？】只要向 MPNowPlayingInfoCenter 传入准确的 ElapsedPlaybackTime、PlaybackDuration 和 PlaybackRate (播放时 1.0，暂停时 0.0)，iOS 系统锁屏界面会根据速率自己平滑推算进度条！',
+              '因此 SPPlayerService 在 -syncNowPlayingInfoForce: 中做了精细节流：仅在 force == YES（切歌、播放/暂停状态改变、用户手动 Seek）、durationJustResolved（流媒体真实时长刚解析出来）或距离上次同步已满 5.0 秒时才真正跨进程更新一次。',
+              '【灵动岛首帧封面】在 -loadArtworkForTrack: 中，优先调用 [[SDImageCache sharedImageCache] imageFromCacheForKey:cacheKey] 同步读取内存/磁盘缓存图片构造 MPMediaItemArtwork，保证切歌瞬间灵动岛首帧即有封面，未命中再走 SDWebImageManager 异步下载回填。'
+            ],
+            code: `- (void)syncNowPlayingInfoForce:(BOOL)force {
+    NSTimeInterval now = CFAbsoluteTimeGetCurrent();
+    BOOL durationJustResolved = (self.lastSyncedDuration <= 0 && self.duration > 0);
+    if (force || durationJustResolved || (now - self.lastInfoUpdateTimestamp >= 5.0)) {
+        self.lastSyncedDuration = self.duration;
+        self.lastInfoUpdateTimestamp = now;
+        [self.systemController updateNowPlayingInfo];
+    }
+}`
+          },
+          {
+            stepTitle: 'Step 5: 来电打断恢复与拔耳机自动暂停',
+            className: 'SPSystemMediaController',
+            methodName: '-handleInterruption: & -handleRouteChange:',
+            file: 'Spotify/Player/System/SPSystemMediaController.m:L72-L97',
+            leftLayer: 'L3',
+            leftNode: 'Class-SPSystemMediaController',
+            painPoint: '听歌时突然打进电话或闹钟响起，挂断电话后音乐应该自动续播（前提是打断前本来就在播）；而当蓝牙耳机断开或拔出有线耳机时，必须立刻暂停防止公共场合突然外放。',
+            logic: [
+              '监听 AVAudioSessionInterruptionNotification：在 InterruptionTypeBegan 时记录 self.shouldResumeAfterInterruption = self.playerService.isPlaying 并暂停；在 InterruptionTypeEnded 时，仅当系统给出 AVAudioSessionInterruptionOptionShouldResume 且打断前处于播放态时，重新激活 AudioSession 并调用 [self.playerService play]。',
+              '监听 AVAudioSessionRouteChangeNotification：当原因等于 AVAudioSessionRouteChangeReasonOldDeviceUnavailable（旧音频输出设备不可用，即耳机断开）时，切主线程调用 [self.playerService pause]。'
+            ],
+            code: `if (type == AVAudioSessionInterruptionTypeBegan) {
+    self.shouldResumeAfterInterruption = self.playerService.isPlaying;
+    [self.playerService pause];
+} else if (type == AVAudioSessionInterruptionTypeEnded) {
+    AVAudioSessionInterruptionOptions options = [info[AVAudioSessionInterruptionOptionKey] unsignedIntegerValue];
+    if ((options & AVAudioSessionInterruptionOptionShouldResume) && self.shouldResumeAfterInterruption) {
+        [self activateAudioSession];
+        [self.playerService play];
+    }
+    self.shouldResumeAfterInterruption = NO;
+}`
+          }
+        ]
+      },
+      {
+        id: 'infinite',
+        badge: '⑥ 首页无限刷新',
+        title: '首页无限刷新（上滑渐进分页）、并发保序与无闪烁增量插入',
+        overview: '首页不仅有顶部「全部 / 音乐 / 播客」三个分类胶囊，每个分类向下滚动时还能渐进加载更多横向卡片分区（Section）。如何在多分类切换、多接口并发请求下做到「不乱序、不串台、不闪屏」？',
+        steps: [
+          {
+            stepTitle: 'Step 1: CompositionalLayout 全局底部 Footer 与 280pt 预触发',
+            className: 'SPHomeViewController & SPHomeLoadMoreFooterView',
+            methodName: '-createLayout & -scrollViewDidScroll:',
+            file: 'Spotify/Modules/Home/SPHomeViewController.m:L268-L325, L632-L644',
+            leftLayer: 'L2',
+            leftNode: 'Class-SPHomeViewController',
+            painPoint: '传统的“滑到最底部松手才开始转菊花加载”会让用户明显感到停顿；而每个 Section 都有自己的 Header，如何挂载一个跨越所有 Section 的全局底部加载状态条？',
+            logic: [
+              '在 UICollectionViewCompositionalLayoutConfiguration 的 boundarySupplementaryItems 上注册全局底部补充视图 SPHomeGlobalFooterKind（高度 56pt 的 SPHomeLoadMoreFooterView），根据 loading / hasMore 自动切换「正在为你发现更多音乐...」「继续下滑，探索更多」「— 已为你呈现全部精选内容 —」。',
+              '在 -scrollViewDidScroll: 中实时计算：当 scrollView.contentOffset.y + height >= contentHeight - 280.0（距离底部还有约一个半卡片高度时），就提前静默触发 [self loadMoreSections]，用户滑到底时新分区往往已经无缝接上了。'
+            ],
+            code: `- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    BOOL hasMore = self.hasMoreByCategory[@([self currentCategory])].boolValue;
+    if (self.isLoadingMore || !hasMore || self.visibleSections.count == 0) return;
+    CGFloat height = CGRectGetHeight(scrollView.bounds);
+    CGFloat contentHeight = scrollView.contentSize.height;
+    if (height > 0 && contentHeight > height && scrollView.contentOffset.y + height >= contentHeight - 280.0) {
+        [self loadMoreSections];
+    }
+}`
+          },
+          {
+            stepTitle: 'Step 2: 三分类独立分页状态机与防串台 Token',
+            className: 'SPHomeViewController',
+            methodName: 'sectionsByCategory / nextPageByCategory / hasMoreByCategory / categoryRequestToken',
+            file: 'Spotify/Modules/Home/SPHomeViewController.m:L94-L101, L346-L424',
+            leftLayer: 'L2',
+            leftNode: 'Class-SPHomeViewController',
+            painPoint: '用户在「全部」分类下滑加载到了第 3 页，此时点击顶部胶囊切到「音乐」，再切回「全部」，如何保留「全部」已加载的 3 页数据且不让未完成的跨分类请求互相污染？',
+            logic: [
+              '使用 3 个以 @(SPHomeCategory) 为 Key 的字典：sectionsByCategory（保存各分类已累积的所有分区）、nextPageByCategory（记录各分类下次该请求第几页，从 @1 开始）、hasMoreByCategory（记录各分类是否还有下一页）。',
+              '点击顶部胶囊 -chipTapped: 时，若目标分类 sectionsByCategory[@(category)] 已有数据，直接赋给 self.visibleSections 秒切展示，保留之前的分页成果！',
+              '请求过程中若用户切换了分类，回调里通过 [weakSelf currentCategory] == category 判断：先把新分区追加进对应分类的后台字典 sectionsByCategory[key]，只有当前仍停留在该分类时才更新 UI。'
+            ],
+            code: `weakSelf.nextPageByCategory[key] = @(requestingPage + 1);
+weakSelf.hasMoreByCategory[key] = @(moreAvailable);
+NSMutableArray<SPHomeSection *> *merged = [NSMutableArray arrayWithArray:weakSelf.sectionsByCategory[key] ?: @[]];
+[merged addObjectsFromArray:newSections];
+weakSelf.sectionsByCategory[key] = merged;`
+          },
+          {
+            stepTitle: 'Step 3: 服务端无分页接口时的客户端多维映射与 slots 保序',
+            className: 'SPNeteaseMusicSource',
+            methodName: '-fetchHomeMoreSectionsForCategory:page:completion:',
+            file: 'Spotify/Data/Netease/SPNeteaseMusicSource.m:L376-L513',
+            leftLayer: 'L4',
+            leftNode: 'Class-SPNeteaseMusicSource',
+            painPoint: '网易云 API 并没有一个现成的「首页第 1~6 页无限流」接口；而且每一页需要并发拉取 3 个不同曲风/榜单/歌手接口，并发回调有快有慢，如何保证每次刷出来的分区顺序固定不乱？',
+            logic: [
+              '将 page = 1..6 映射为不同的曲风维度组合（例如 Page 1 并发拉取「华语」「流行」「官方热门榜单后段」；Page 2 并发拉取「摇滚」「民谣」「更多实力艺人 offset=10」；Page 3 拉「电子」「轻音乐」「新碟上架」... 直到 Page 6「治愈」「夜晚」「运动」，并在 page < 6 时返回 hasMore = YES）。',
+              '【slots 槽位锁保序】预先创建长度为 3 的占位数组 NSMutableArray *slots = [NSMutableArray arrayWithObjects:NSNull.null, NSNull.null, NSNull.null, nil]；3 个并发请求各自持有固定的槽位下标 idx (0, 1, 2)，请求返回后通过 @synchronized(slots) { slots[idx] = sec; } 归位；最后在 dispatch_group_notify 中按 0->1->2 顺序过滤掉 NSNull.null 输出，既享受了 3 路并发的速度，又保证了分区顺序 100% 确定！'
+            ],
+            code: `NSMutableArray<SPHomeSection *> *slots = [NSMutableArray arrayWithObjects:NSNull.null, NSNull.null, NSNull.null, nil];
+void (^loadPlaylistCat)(NSInteger, NSString *, NSString *) = ^(NSInteger idx, NSString *title, NSString *cat) {
+    dispatch_group_enter(group);
+    [weakSelf.client GET:@"/top/playlist" parameters:@{@"cat": cat, @"order": @"hot", @"limit": @10} ... completion:^(NSDictionary *json, NSError *err) {
+        ...
+        @synchronized (slots) { slots[idx] = sec; } // 按固定槽位下标写入，彻底解决并发乱序
+        dispatch_group_leave(group);
+    }];
+};`
+          },
+          {
+            stepTitle: 'Step 4: performBatchUpdates 无动画增量插入防闪屏',
+            className: 'SPHomeViewController & SPMusicRepository',
+            methodName: 'insertSections: & -warmCachesFromHomeSections:',
+            file: 'Spotify/Modules/Home/SPHomeViewController.m:L407-L420 & SPMusicRepository.m:L132-L146',
+            leftLayer: 'L2',
+            leftNode: 'Class-SPHomeViewController',
+            painPoint: '上滑加载出新分区后，如果直接调 [self.collectionView reloadData]，正在滚动的 CollectionView 会瞬间打断惯性滚动，且已渲染的卡片会重新閃动；而默认带动画的 insertSections: 又会导致底部 Footer 出现奇怪的弹簧跳动。',
+            logic: [
+              '计算旧分区数量 oldCount 与新增分区区间 NSIndexSet *added = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(oldCount, newSections.count)]。',
+              '使用 [UIView performWithoutAnimation:^{ [weakSelf.collectionView performBatchUpdates:^{ [weakSelf.collectionView insertSections:added]; } completion:nil]; }] —— 仅在底部静默拼接新增的 Section Cell，上方已存在的 Cell 和用户当前的滚动手势丝毫不受影响！',
+              '同时 SPMusicRepository 在收到新分页数据后自动调用 [weakSelf warmCachesFromHomeSections:sections]，将新刷出来的歌单/专辑也预热进 L3 缓存。'
+            ],
+            code: `NSInteger oldCount = weakSelf.visibleSections.count;
+weakSelf.visibleSections = merged;
+if (weakSelf.collectionView.numberOfSections == oldCount) {
+    NSIndexSet *added = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(oldCount, newSections.count)];
+    [UIView performWithoutAnimation:^{
+        [weakSelf.collectionView performBatchUpdates:^{
+            [weakSelf.collectionView insertSections:added];
+        } completion:nil];
+    }];
+}`
+          }
+        ]
+      },
+      {
+        id: 'uiarch',
+        badge: '⑦ 界面架构与丝滑转场',
+        title: '三明治根容器、零抖动抽屉、三槽位横滑切歌与封面飞行转场',
+        overview: '为什么这个纯 UIKit + Masonry 项目的界面交互感觉像 Spotify 原生 App 一样跟手顺滑？核心在于 SPRootViewController 的三层叠加架构与 4 处精心设计的转场/手势编排。',
+        steps: [
+          {
+            stepTitle: 'Step 1: SceneDelegate 启动路由与 SPRootViewController 三明治容器',
+            className: 'SceneDelegate & SPRootViewController',
+            methodName: '-setupContentContainer / -setupTabs / -setupBottomDock / -setupOverlayDrawer',
+            file: 'Spotify/App/SceneDelegate.m:L45-L75 & SPRootViewController.m:L183-L370',
+            leftLayer: 'L1',
+            leftNode: 'Class-SPRootViewController',
+            painPoint: 'Spotify 的底部结构不是系统标准 UITabBar：它有一个自定义紧凑底栏（52pt）、一个悬浮在底栏上方 8pt 的圆角迷你播放条（56pt），且无论在首页、搜索、音乐库还是推入的二级详情页（SPDetailViewController），迷你播放条和底栏都必须常驻在屏幕底部，不被 Push 动画推走，同时又不能遮挡页面列表的最后一行！',
+            logic: [
+              '【隐藏原生 TabBar，外置自定义底栏】SPInternalTabBarController 在 viewDidLoad 和 viewDidLayoutSubviews 中强制将系统 self.tabBar.hidden = YES。SPRootViewController 在外层 contentContainer 底部用 Masonry 固定搭建 _customTabBar（高 52pt）和悬浮在其上方的 self.miniPlayer（高 56pt）。因为每个 Tab 内部都是独立的 SPNavigationController，所以在 Tab 内部 push 二级详情页时，外层的 MiniPlayer 和 customTabBar 天然稳如泰山！',
+              '【动态底部安全区避让 -updateTabDockMetrics】当 MiniPlayer 显示或隐藏时，SPRootViewController 自动计算底部总占用高度 inset = 52 + (visible ? (56 + 16) : 6)，直接赋给 3 个子导航控制器的 vc.additionalSafeAreaInsets = UIEdgeInsetsMake(0, 0, inset, 0)。所有子页面的 UITableView / UICollectionView 自动通过系统 SafeArea 留出准确的底部内边距，最后一行永远不会被 MiniPlayer 挡住！'
+            ],
+            code: `- (void)updateTabDockMetrics {
+    BOOL visible = ([SPPlayerService shared].currentTrack != nil);
+    CGFloat inset = SPDockTabBarHeight + (visible ? (SPMiniPlayerHeight + 16.0) : 6.0);
+    for (UIViewController *vc in self.tabController.viewControllers) {
+        UIEdgeInsets insets = vc.additionalSafeAreaInsets;
+        insets.bottom = inset;
+        vc.additionalSafeAreaInsets = insets;
+    }
+}`
+          },
+          {
+            stepTitle: 'Step 2: 零抖动抽屉与「先静默 Push 再滑出抽屉」单段转场',
+            className: 'SPRootViewController & SPNavigationController',
+            methodName: '-applyDrawerProgress: / -handleDrawerAction: / -gestureRecognizerShouldBegin:',
+            file: 'Spotify/App/SPRootViewController.m:L452-L591 & SPNavigationController.m:L13-L26',
+            leftLayer: 'L1',
+            leftNode: 'Class-SPRootViewController',
+            painPoint: '很多 App 做左侧抽屉时把主界面往右推，不仅触发复杂 CollectionView 重算布局导致掉帧，而且从抽屉点击「设置」时会出现「先关抽屉闪一下首页 -> 再从右边推入设置页」的两段式视觉割裂。',
+            logic: [
+              '【底层绝对静止】在 -applyDrawerProgress: 中，主视图 contentContainer 的 frame 和 transform 完全不动！只有覆盖在顶层的 drawerContainerView 做 CGAffineTransformMakeTranslation(-w * (1.0 - clamped), 0) 平移，配合 drawerDimView.alpha = clamped，帧率稳跑满帧。',
+              '【手势仲裁】SPNavigationController 隐藏系统导航栏后通过 self.interactivePopGestureRecognizer.delegate = self 恢复了二级页右滑返回；而 SPRootViewController 的左边缘拉出抽屉手势 edgePan 在 -gestureRecognizerShouldBegin: 中判断当 nav.viewControllers.count > 1（处于二级页）时主动返回 NO，把左边缘手势完美让位给二级页返回！',
+              '【单段无痕跳转】在抽屉里点击「新动态 / 收听历史 / 设置与隐私」时（-handleDrawerAction:），先在静止的底层导航栈执行 [nav pushViewController:targetVC animated:NO] 让目标页瞬间就位，紧接着调用 [self closeSideDrawerAnimated:YES] 让抽屉向左滑出，如同拉开帷幕直接露出目标页！'
+            ],
+            code: `if (targetVC) {
+    UINavigationController *nav = (UINavigationController *)self.tabController.selectedViewController;
+    if ([nav isKindOfClass:UINavigationController.class] && ![nav.topViewController isKindOfClass:targetVC.class]) {
+        // 先让目标页在静止的底层就位，随后抽屉单段平滑滑出并显露目标页
+        [nav pushViewController:targetVC animated:NO];
+    }
+}
+[self closeSideDrawerAnimated:YES completion:nil];`
+          },
+          {
+            stepTitle: 'Step 3: 三槽位 (Prev / Center / Next) 无限横滑切歌与实时色彩插值',
+            className: 'SPMiniPlayerView & SPNowPlayingViewController',
+            methodName: '-scrollViewDidScroll: & -finalizeTrackPagerSettle:',
+            file: 'Spotify/Modules/MiniPlayer/SPMiniPlayerView.m:L368-L437 & SPNowPlayingViewController.m:L756-L830',
+            leftLayer: 'L2',
+            leftNode: 'Class-SPMiniPlayerView',
+            painPoint: '播放队列可能有上百首歌，且随时可能开启随机洗牌或插队下一首。如何在 MiniPlayer 和全屏播放页只用 3 个子视图就实现无限左右滑动预览切歌、滑动中背景色实时平滑过渡、松手切歌瞬间 0 闪烁？',
+            logic: [
+              '【三槽位恒定居中】在 pagingEnabled 的横向 UIScrollView（宽度 3w）中只放 3 个槽位：prevSlot (x=0)、centerSlot (x=w)、nextSlot (x=2w)，平时 scrollView 永远停在中间页 contentOffset.x = w。',
+              '【滑动中背景色实时线性插值】预先提取好上一首、当前首、下一首封面的主色调（prevTintedColor / centerTintedColor / nextTintedColor）。手指拖动时在 -scrollViewDidScroll: 中计算偏移比例 delta = (offsetX - w) / w，实时调用 [baseColor sp_interpolatedToColor:targetColor fraction:fabs(delta)]，手指滑到哪，背景渐变色就跟到哪！',
+              '【松手归位瞬间画面接力】当手指松开落定在第 0 页（上一首）或第 2 页（下一首）时，在 -finalizeTrackPagerSettle: 中：① 先把目标槽位已经渲染好的 coverView.image、titleLabel.text、targetColor 原封不动同步赋值给 centerSlot；② 将 ignoreScrollEvents = YES，无动画瞬间把 scrollView 重置回中间页 setContentOffset:CGPointMake(w, 0) animated:NO；③ 最后才调用 [player next] 或 [player skipToPreviousTrack] 刷新新的左右相邻槽位。人眼看到的画面完全连续，0 闪烁！'
+            ],
+            code: `// 在归位瞬间把目标槽位画面接力到 centerSlot，彻底消除闪动
+SPMiniPlayerTrackSlotView *sourceSlot = isNext ? self.nextSlot : self.prevSlot;
+self.centerSlot.coverView.image = sourceSlot.coverView.image;
+self.centerSlot.titleLabel.text = sourceSlot.titleLabel.text;
+self.centerSlot.artistLabel.text = sourceSlot.artistLabel.text;
+self.ignoreScrollEvents = YES;
+[scrollView setContentOffset:CGPointMake(self.lastPagerWidth, 0) animated:NO];
+self.ignoreScrollEvents = NO;
+if (isNext) [player next]; else [player skipToPreviousTrack];`
+          },
+          {
+            stepTitle: 'Step 4: MiniPlayer 到全屏播放页的封面跨层级飞行转场',
+            className: 'SPNowPlayingTransition & SPNowPlayingAnimator',
+            methodName: '-animateTransition:',
+            file: 'Spotify/Modules/Transition/SPNowPlayingTransition.m:L21-L113',
+            leftLayer: 'L2',
+            leftNode: 'Class-SPNowPlayingTransition',
+            painPoint: '点击底部 MiniPlayer 展开全屏播放页时，如果用系统默认的从底部傻傻推上来的 Modal 动画，小封面和大封面是割裂的两个元素，缺乏空间连续感。',
+            logic: [
+              'SPRootViewController 将 SPNowPlayingViewController 的 modalPresentationStyle 设为 UIModalPresentationCustom，并将 transitioningDelegate 指向 SPNowPlayingTransition。',
+              '在 SPNowPlayingAnimator -animateTransition: 中：① 先将 toVC.view 加入转场 container 并调 [toVC.view layoutIfNeeded] 算出大封面最终布局；② 用 [sourceCover convertRect:sourceCover.bounds toView:container] 和 [targetCover convertRect:targetCover.bounds toView:container] 算出小封面（40×40，圆角 4pt）与大封面（约 320×320，圆角 8pt）在同一个转场容器坐标系下的精确 CGRect。',
+              '③ 暂时隐藏真小封面与真大封面，在 container 顶层创建一个临时的 floatingCover，用阻尼 0.88 的 Spring 弹簧动画同时驱动 floatingCover 的 frame 与 cornerRadius 从小封面飞向大封面（关闭时则反向从大封面飞回 MiniPlayer 小封面），完成后移除 floatingCover 并恢复真封面显示。'
+            ],
+            code: `CGRect sourceFrame = [sourceCover convertRect:sourceCover.bounds toView:container];
+CGRect targetFrame = [targetCover convertRect:targetCover.bounds toView:container];
+UIImageView *floatingCover = [self floatingCoverWithImage:coverImage frame:sourceFrame cornerRadius:4];
+[container addSubview:floatingCover];
+sourceCover.hidden = YES;
+targetCover.hidden = YES;
+[UIView animateWithDuration:0.42 delay:0 usingSpringWithDamping:0.88 initialSpringVelocity:0.2 ... animations:^{
+    toVC.view.alpha = 1;
+    toVC.view.transform = CGAffineTransformIdentity;
+    floatingCover.frame = targetFrame;
+    floatingCover.layer.cornerRadius = 8;
+} completion:^(BOOL finished) {
+    sourceCover.hidden = NO;
+    targetCover.hidden = NO;
+    [floatingCover removeFromSuperview];
+    [transitionContext completeTransition:!transitionContext.transitionWasCancelled];
+}];`
+          }
+        ]
+      }
+    ];
+
+    // ==================== 状态管理与渲染逻辑 ====================
+    let currentLayerId = 'L0';
+    let currentScenarioId = 'protocols';
+    let currentStepIndex = 0;
+    let expandedNodes = new Set(['Pillar-Facade', 'Proto-SPMusicDataSource']);
+    let highlightedNodeId = null;
+    let searchQuery = '';
+
+    function escapeHTML(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    // 渲染区块一：层级切换胶囊
+    function renderLayerTabs() {
+      const container = document.getElementById('layerTabs');
+      container.innerHTML = ARCH_LAYERS.map(layer => {
+        const active = layer.id === currentLayerId;
+        const cls = active
+          ? 'bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold shadow-sm'
+          : 'bg-[var(--card)] text-[var(--muted-foreground)] border border-[var(--border)] hover:text-[var(--foreground)]';
+        return `<button onclick="selectLayer('${layer.id}')" class="px-2.5 py-1 text-xs rounded-lg transition ${cls}">${escapeHTML(layer.badge)}</button>`;
+      }).join('');
+    }
+
+    // 渲染区块一：当前层级内容
+    function renderLeftPane() {
+      const layer = ARCH_LAYERS.find(l => l.id === currentLayerId) || ARCH_LAYERS[0];
+      const q = searchQuery.trim().toLowerCase();
+      const container = document.getElementById('leftPaneContent');
+
+      // 如果有搜索词，跨所有层级过滤匹配节点
+      let nodesToShow = [];
+      if (q.length > 0) {
+        ARCH_LAYERS.forEach(l => {
+          l.nodes.forEach(n => {
+            const hay = `${n.name} ${n.file} ${n.role} ${n.provides || ''} ${n.implementers || ''} ${n.consumers || ''} ${(n.methods || []).join(' ')}`.toLowerCase();
+            if (hay.includes(q)) {
+              nodesToShow.push({ ...n, _layerBadge: l.badge, _layerId: l.id });
+            }
+          });
+        });
+      } else {
+        nodesToShow = layer.nodes;
+      }
+
+      document.getElementById('leftCountBadge').textContent = q.length > 0
+        ? `搜索命中 ${nodesToShow.length} 项`
+        : `${layer.nodes.length} 个核心模块`;
+
+      let html = '';
+
+      if (q.length === 0) {
+        html += `
+          <div class="p-3 rounded-lg bg-[var(--background)] border border-[var(--border)] space-y-1.5">
+            <div class="flex items-center justify-between">
+              <h2 class="text-sm font-bold text-[var(--foreground)]">${escapeHTML(layer.title)}</h2>
+              <span class="text-xs font-mono text-[var(--primary)]">${escapeHTML(layer.badge)}</span>
+            </div>
+            <div class="text-xs font-medium text-[var(--muted-foreground)]">${escapeHTML(layer.subtitle)}</div>
+            <p class="text-xs text-[var(--foreground)] opacity-90 leading-relaxed pt-1 border-t border-[var(--card-border)]">${escapeHTML(layer.summary)}</p>
+          </div>
+        `;
+
+        // 如果是 L0 总控层，渲染交互式五层架构栈拓扑图
+        if (layer.diagram) {
+          html += `
+            <div class="space-y-2">
+              <div class="text-xs font-semibold text-[var(--muted-foreground)] flex items-center justify-between">
+                <span>▼ 点击下方任意架构层级即可按层进入查看局部架构：</span>
+              </div>
+              <div class="space-y-1.5">
+                ${layer.diagram.map((d, idx) => `
+                  <div class="p-2.5 rounded-lg bg-[var(--background)] border border-[var(--border)] hover:border-[var(--primary)] transition cursor-pointer group"
+                       onclick="selectLayer('${d.layerId}')">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="px-2 py-0.5 text-xs font-bold rounded bg-[var(--secondary)] text-[var(--secondary-foreground)] group-hover:bg-[var(--primary)] group-hover:text-[var(--primary-foreground)] transition">${escapeHTML(d.tag)}</span>
+                      <div class="flex items-center gap-1.5">
+                        <button onclick="event.stopPropagation(); selectScenario('${d.jumpScenario}', 0)"
+                                class="px-2 py-0.5 text-xs rounded bg-[var(--card)] border border-[var(--border)] text-[var(--link)] hover:underline">
+                          右侧重点逻辑 →
+                        </button>
+                        <span class="text-xs text-[var(--primary)] font-semibold">进入该层 ▸</span>
+                      </div>
+                    </div>
+                    <div class="text-xs font-mono font-semibold mt-1.5 text-[var(--foreground)]">${escapeHTML(d.name)}</div>
+                    <div class="text-xs text-[var(--muted-foreground)] mt-0.5">${escapeHTML(d.desc)}</div>
+                  </div>
+                  ${idx < layer.diagram.length - 1 ? `<div class="text-center text-xs text-[var(--muted-foreground)] leading-none">↓ 单向依赖 / 协议回调 ↑</div>` : ''}
+                `).join('')}
+              </div>
+            </div>
+          `;
+        }
+      }
+
+      // 渲染当前层级的类/协议卡片（支持折叠/展开与跳转到右栏）
+      html += `<div class="space-y-2.5">`;
+      if (nodesToShow.length === 0) {
+        html += `<div class="p-6 text-center text-xs text-[var(--muted-foreground)]">未找到匹配「${escapeHTML(searchQuery)}」的类或协议</div>`;
+      } else {
+        nodesToShow.forEach(node => {
+          const isExpanded = q.length > 0 || expandedNodes.has(node.id) || highlightedNodeId === node.id;
+          const isHighlighted = highlightedNodeId === node.id;
+          const borderCls = isHighlighted ? 'border-[var(--primary)] pulse-ring' : 'border-[var(--border)]';
+
+          html += `
+            <div id="node-${node.id}" class="rounded-lg bg-[var(--background)] border ${borderCls} overflow-hidden transition">
+              <div onclick="toggleNode('${node.id}')" class="p-3 cursor-pointer hover:opacity-95 flex items-start justify-between gap-2">
+                <div class="space-y-1">
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    ${node._layerBadge ? `<span class="px-1.5 py-0.5 text-xs rounded bg-[var(--secondary)] text-[var(--secondary-foreground)]">${escapeHTML(node._layerBadge)}</span>` : ''}
+                    <span class="text-xs md:text-sm font-mono font-bold text-[var(--foreground)]">${escapeHTML(node.name)}</span>
+                  </div>
+                  <div class="text-xs text-[var(--muted-foreground)]">${escapeHTML(node.role)}</div>
+                </div>
+                <span class="text-xs font-mono text-[var(--primary)] shrink-0">${isExpanded ? '收起 ▾' : '展开 ▸'}</span>
+              </div>
+
+              ${isExpanded ? `
+                <div class="px-3 pb-3 pt-2 border-t border-[var(--card-border)] space-y-2 text-xs">
+                  <div class="font-mono text-[var(--muted-foreground)] bg-[var(--card)] px-2 py-1 rounded border border-[var(--border)] break-all">
+                    📄 ${escapeHTML(node.file)}
+                  </div>
+
+                  ${node.provides ? `
+                    <div class="space-y-0.5">
+                      <div class="font-semibold text-[var(--foreground)]">职责与对外能力：</div>
+                      <div class="text-[var(--muted-foreground)] leading-relaxed">${escapeHTML(node.provides)}</div>
+                    </div>
+                  ` : ''}
+
+                  ${node.implementers ? `
+                    <div class="space-y-0.5">
+                      <div class="font-semibold text-[var(--success)]">✅ 哪些类实现了该协议 (Implementers)：</div>
+                      <div class="text-[var(--foreground)] whitespace-pre-line leading-relaxed bg-[var(--card)] p-2 rounded border border-[var(--border)]">${escapeHTML(node.implementers)}</div>
+                    </div>
+                  ` : ''}
+
+                  ${node.consumers ? `
+                    <div class="space-y-0.5">
+                      <div class="font-semibold text-[var(--link)]">🎯 接口提供给谁调用 (Consumers)：</div>
+                      <div class="text-[var(--foreground)] leading-relaxed bg-[var(--card)] p-2 rounded border border-[var(--border)]">${escapeHTML(node.consumers)}</div>
+                    </div>
+                  ` : ''}
+
+                  ${node.methods && node.methods.length ? `
+                    <div class="space-y-1">
+                      <div class="font-semibold text-[var(--foreground)]">🔧 核心方法实现清单：</div>
+                      <ul class="space-y-1 font-mono bg-[var(--card)] p-2 rounded border border-[var(--border)]">
+                        ${node.methods.map(m => `<li class="text-xs text-[var(--code-foreground)] break-all">• ${escapeHTML(m)}</li>`).join('')}
+                      </ul>
+                    </div>
+                  ` : ''}
+
+                  ${node.jump ? `
+                    <div class="pt-1 flex justify-end">
+                      <button onclick="selectScenario('${node.jump.scenario}', ${node.jump.step})"
+                              class="px-3 py-1.5 rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold text-xs hover:opacity-90 transition">
+                        在右侧查看该模块重点实现逻辑 →
+                      </button>
+                    </div>
+                  ` : ''}
+                </div>
+              ` : ''}
+            </div>
+          `;
+        });
+      }
+      html += `</div>`;
+      container.innerHTML = html;
+    }
+
+    // 渲染区块二：专题切换胶囊
+    function renderScenarioTabs() {
+      const container = document.getElementById('scenarioTabs');
+      container.innerHTML = SCENARIOS.map(sc => {
+        const active = sc.id === currentScenarioId;
+        const cls = active
+          ? 'bg-[var(--primary)] text-[var(--primary-foreground)] font-semibold shadow-sm'
+          : 'bg-[var(--card)] text-[var(--muted-foreground)] border border-[var(--border)] hover:text-[var(--foreground)]';
+        return `<button onclick="selectScenario('${sc.id}', 0)" class="px-2.5 py-1 text-xs rounded-lg transition ${cls}">${escapeHTML(sc.badge)}</button>`;
+      }).join('');
+    }
+
+    // 渲染区块二：调用路径步骤条与深度逻辑详解
+    function renderRightPane() {
+      const scenario = SCENARIOS.find(s => s.id === currentScenarioId) || SCENARIOS[0];
+      if (currentStepIndex >= scenario.steps.length) currentStepIndex = 0;
+      const step = scenario.steps[currentStepIndex];
+
+      document.getElementById('rightStepIndicator').textContent =
+        `步骤 ${currentStepIndex + 1} / ${scenario.steps.length}`;
+
+      const container = document.getElementById('rightPaneContent');
+      container.innerHTML = `
+        <!-- 专题导语 -->
+        <div class="p-3.5 rounded-lg bg-[var(--background)] border border-[var(--border)] space-y-1.5">
+          <div class="flex items-center justify-between gap-2">
+            <h2 class="text-sm md:text-base font-bold text-[var(--foreground)]">${escapeHTML(scenario.title)}</h2>
+            <span class="px-2 py-0.5 text-xs font-semibold rounded bg-[var(--secondary)] text-[var(--secondary-foreground)] shrink-0">${escapeHTML(scenario.badge)}</span>
+          </div>
+          <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">${escapeHTML(scenario.overview)}</p>
+        </div>
+
+        <!-- 交互式调用链路步骤条 (Call Path Stepper) -->
+        <div class="space-y-1.5">
+          <div class="text-xs font-semibold text-[var(--muted-foreground)]">
+            🧭 路径节点导航（点击下方链路中的任意环节切换详细实现逻辑）：
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-1.5">
+            ${scenario.steps.map((st, idx) => {
+              const active = idx === currentStepIndex;
+              const cls = active
+                ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)] font-semibold'
+                : 'bg-[var(--background)] text-[var(--foreground)] border-[var(--border)] hover:border-[var(--primary)]';
+              return `
+                <button onclick="selectStep(${idx})"
+                        class="p-2 rounded-lg border text-left transition flex flex-col justify-between ${cls}">
+                  <div class="text-xs leading-snug">${idx + 1}. ${escapeHTML(st.stepTitle)}</div>
+                  <div class="text-xs font-mono opacity-80 truncate mt-1">${escapeHTML(st.className)}</div>
+                </button>
+              `;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- 当前选中路径节点的深度实现卡片 -->
+        <div class="p-4 rounded-xl bg-[var(--background)] border border-[var(--primary)] space-y-3.5">
+          <div class="flex flex-wrap items-start justify-between gap-2 pb-2.5 border-b border-[var(--card-border)]">
+            <div class="space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 text-xs font-bold rounded bg-[var(--primary)] text-[var(--primary-foreground)]">环节 ${currentStepIndex + 1}</span>
+                <h3 class="text-sm md:text-base font-bold text-[var(--foreground)]">${escapeHTML(step.stepTitle)}</h3>
+              </div>
+              <div class="text-xs font-mono text-[var(--link)] break-all">
+                类：<strong>${escapeHTML(step.className)}</strong> · 方法：<strong>${escapeHTML(step.methodName)}</strong>
+              </div>
+              <div class="text-xs font-mono text-[var(--muted-foreground)]">
+                📍 源码路径：${escapeHTML(step.file)}
+              </div>
+            </div>
+            <button onclick="locateInLeftPane('${step.leftLayer}', '${step.leftNode}')"
+                    class="px-2.5 py-1.5 rounded-lg bg-[var(--secondary)] text-[var(--secondary-foreground)] text-xs font-semibold hover:opacity-90 transition shrink-0">
+              ← 在左栏架构中定位此类
+            </button>
+          </div>
+
+          <!-- 工程痛点 -->
+          <div class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)] space-y-1">
+            <div class="text-xs font-bold text-[var(--warning)]">💡 为什么要这样写？（工程痛点与场景挑战）</div>
+            <p class="text-xs text-[var(--foreground)] leading-relaxed">${escapeHTML(step.painPoint)}</p>
+          </div>
+
+          <!-- 核心实现逻辑分步拆解 -->
+          <div class="space-y-2">
+            <div class="text-xs font-bold text-[var(--success)]">⚙️ 核心实现逻辑逐层拆解：</div>
+            <div class="space-y-2">
+              ${step.logic.map((item, i) => `
+                <div class="p-2.5 rounded-lg bg-[var(--card)] border border-[var(--border)] flex items-start gap-2.5 text-xs leading-relaxed">
+                  <span class="px-1.5 py-0.5 rounded bg-[var(--secondary)] text-[var(--secondary-foreground)] font-mono font-bold shrink-0">${i + 1}</span>
+                  <span class="text-[var(--foreground)]">${escapeHTML(item)}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- 关键源码对照 -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-bold text-[var(--foreground)]">📝 项目真实关键源码摘录：</span>
+              <span class="font-mono text-[var(--muted-foreground)]">${escapeHTML(step.file)}</span>
+            </div>
+            <pre class="p-3 rounded-lg bg-[var(--card)] border border-[var(--border)] text-xs font-mono text-[var(--code-foreground)] overflow-x-auto leading-relaxed custom-scroll"><code>${escapeHTML(step.code)}</code></pre>
+          </div>
+
+          <!-- 上一步 / 下一步导航 -->
+          <div class="pt-2 border-t border-[var(--card-border)] flex items-center justify-between">
+            <button onclick="selectStep(${Math.max(0, currentStepIndex - 1)})"
+                    ${currentStepIndex === 0 ? 'disabled' : ''}
+                    class="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--card)] border border-[var(--border)] disabled:opacity-40 hover:border-[var(--primary)] transition">
+              ← 上一环节
+            </button>
+            <span class="text-xs text-[var(--muted-foreground)]">当前路径共 ${scenario.steps.length} 个核心环节</span>
+            <button onclick="selectStep(${Math.min(scenario.steps.length - 1, currentStepIndex + 1)})"
+                    ${currentStepIndex === scenario.steps.length - 1 ? 'disabled' : ''}
+                    class="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--primary)] text-[var(--primary-foreground)] disabled:opacity-40 hover:opacity-90 transition">
+              下一环节 →
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    // ==================== 交互控制函数 ====================
+    function selectLayer(layerId) {
+      currentLayerId = layerId;
+      highlightedNodeId = null;
+      renderLayerTabs();
+      renderLeftPane();
+    }
+
+    function toggleNode(nodeId) {
+      if (expandedNodes.has(nodeId)) {
+        expandedNodes.delete(nodeId);
+      } else {
+        expandedNodes.add(nodeId);
+      }
+      highlightedNodeId = null;
+      renderLeftPane();
+    }
+
+    function selectScenario(scenarioId, stepIdx = 0) {
+      currentScenarioId = scenarioId;
+      currentStepIndex = stepIdx;
+      renderScenarioTabs();
+      renderRightPane();
+    }
+
+    function selectStep(stepIdx) {
+      currentStepIndex = stepIdx;
+      renderRightPane();
+    }
+
+    function locateInLeftPane(layerId, nodeId) {
+      currentLayerId = layerId;
+      expandedNodes.add(nodeId);
+      highlightedNodeId = nodeId;
+      searchQuery = '';
+      document.getElementById('globalSearch').value = '';
+      document.getElementById('clearSearchBtn').classList.add('hidden');
+      renderLayerTabs();
+      renderLeftPane();
+      setTimeout(() => {
+        const el = document.getElementById(`node-${nodeId}`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 60);
+    }
+
+    function quickJump(layerId, scenarioId) {
+      currentLayerId = layerId;
+      currentScenarioId = scenarioId;
+      currentStepIndex = 0;
+      renderLayerTabs();
+      renderLeftPane();
+      renderScenarioTabs();
+      renderRightPane();
+    }
+
+    // 搜索过滤绑定
+    document.getElementById('globalSearch').addEventListener('input', (e) => {
+      searchQuery = e.target.value;
+      const clearBtn = document.getElementById('clearSearchBtn');
+      if (searchQuery.trim().length > 0) {
+        clearBtn.classList.remove('hidden');
+      } else {
+        clearBtn.classList.add('hidden');
+      }
+      renderLeftPane();
+    });
+
+    document.getElementById('clearSearchBtn').addEventListener('click', () => {
+      searchQuery = '';
+      document.getElementById('globalSearch').value = '';
+      document.getElementById('clearSearchBtn').classList.add('hidden');
+      renderLeftPane();
+    });
+
+    // 初始渲染
+    renderLayerTabs();
+    renderLeftPane();
+    renderScenarioTabs();
+    renderRightPane();
+  </script>
+</body>
+</html>
